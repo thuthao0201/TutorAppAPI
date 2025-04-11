@@ -1,8 +1,27 @@
 const Tutor = require("../models/tutor.model");
+const User = require("../models/user.model");
+const {
+  hashPassword
+} = require("../utils/auth.util");
 
 const createTutor = async (req, res) => {
   try {
-    const tutor = new Tutor(req.body);
+    const {email, password} = req.body;
+    const userExists = await User.exists({email});
+    if (userExists) {
+      return res.status(400).json({
+        status: "fail",
+        data: {email: "Email already exists"},
+      });
+    }
+    const passwordHash = await hashPassword(password);
+    const user = await User.create({
+      ...req.body,
+      password: passwordHash,
+      role: "tutor",
+    });
+
+    const tutor = new Tutor({...req.body, userId: user._id});
     await tutor.save();
     res.status(201).json({
       status: "success",
@@ -19,7 +38,10 @@ const createTutor = async (req, res) => {
 // Thêm pagination và filter cho getTutors
 const getTutors = async (req, res) => {
   try {
-    const Tutors = await Tutor.find({}).populate("userId");
+    const Tutors = await Tutor.find({}).populate(
+      "userId",
+      "name email phone avatar"
+    );
     res.json({
       status: "success",
       data: Tutors,
@@ -35,13 +57,13 @@ const getTutors = async (req, res) => {
 
 const getTutor = async (req, res) => {
   try {
-    const Tutor = await Tutor.findById(req.params.id)
+    const tutor = await Tutor.findById(req.params.id)
       .populate("userId")
       .populate({
         path: "recentReviews",
-        populate: { path: "userId", select: "name avatar" },
+        populate: {path: "userId", select: "name avatar phone"},
       });
-    if (!Tutor) {
+    if (!tutor) {
       return res.status(404).json({
         status: "fail",
         message: "Không tìm thấy thông tin gia sư",
@@ -49,7 +71,7 @@ const getTutor = async (req, res) => {
     }
     res.json({
       status: "success",
-      data: Tutor,
+      data: tutor,
     });
   } catch (error) {
     res.status(500).json({
@@ -62,8 +84,8 @@ const getTutor = async (req, res) => {
 // Xem lai sau
 const getAvailableTutors = async (req, res) => {
   try {
-    const { subject, day, time } = req.query; // Lọc theo môn học, ngày, khung giờ
-    let tutors = await Tutor.find({ subjects: subject }); //Lấy danh sách gia sư có thể dạy môn học này
+    const {subject, day, time} = req.query; // Lọc theo môn học, ngày, khung giờ
+    let tutors = await Tutor.find({subjects: subject}); //Lấy danh sách gia sư có thể dạy môn học này
     //Lọc gia sư chưa có lịch dạy trùng giờ
     tutors = tutors.filter((tutor) => {
       const bookedSlots = tutor.schedule.get(day) || [];

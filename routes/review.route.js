@@ -10,8 +10,11 @@ const {
   deleteReview,
 } = require("../controllers/review.controller");
 
+const { isAdmin, isOwnerOrAdmin } = require("../middlewares/role.middleware");
+
+router.get("/", isAdmin, getReviews);
 router.get("/:id", getReview);
-router.patch("/:id", updateReview);
-router.delete("/:id", deleteReview);
+router.patch("/:id", isOwnerOrAdmin, updateReview);
+router.delete("/:id", isOwnerOrAdmin, deleteReview);
 
 module.exports = router;

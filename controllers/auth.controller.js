@@ -8,14 +8,14 @@ const {
 const jwt = require("jsonwebtoken");
 
 const register = async (req, res) => {
-  const { name, email, password, phoneNumber } = req.body;
+  const {name, email, password, phone} = req.body;
 
   try {
-    const userExists = await User.exists({ email });
+    const userExists = await User.exists({email});
     if (userExists) {
       return res.status(400).json({
         status: "fail",
-        data: { email: "Email already exists" },
+        data: {email: "Email already exists"},
       });
     }
 
@@ -25,7 +25,7 @@ const register = async (req, res) => {
       name,
       email,
       password: passwordHash,
-      phoneNumber,
+      phone,
     });
 
     const accessToken = generateAccessToken(user);
@@ -36,27 +36,27 @@ const register = async (req, res) => {
 
     res.status(201).json({
       status: "success",
-      data: { accessToken, refreshToken },
+      data: {accessToken, refreshToken},
     });
   } catch (err) {
     res.status(500).json({
       status: "error",
       message: "Internal Server Error",
       code: 500,
-      data: { error: err.message },
+      data: {error: err.message},
     });
   }
 };
 
 const login = async (req, res) => {
-  const { email, password } = req.body;
+  const {email, password} = req.body;
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({email});
     if (!user) {
       return res.status(400).json({
         status: "fail",
-        data: { email: "Email not found" },
+        data: {email: "Email not found"},
       });
     }
 
@@ -64,7 +64,7 @@ const login = async (req, res) => {
     if (!validPass) {
       return res.status(400).json({
         status: "fail",
-        data: { password: "Password is incorrect" },
+        data: {password: "Password is incorrect"},
       });
     }
 
@@ -76,25 +76,25 @@ const login = async (req, res) => {
 
     res.status(200).json({
       status: "success",
-      data: { accessToken, refreshToken },
+      data: {accessToken, refreshToken},
     });
   } catch (err) {
     res.status(500).json({
       status: "error",
       message: "Internal Server Error",
       code: 500,
-      data: { error: err.message },
+      data: {error: err.message},
     });
   }
 };
 
 const refreshToken = async (req, res) => {
-  const { refreshToken } = req.body;
+  const {refreshToken} = req.body;
 
   if (!refreshToken) {
     return res.status(401).json({
       status: "fail",
-      data: { message: "Access Denied" },
+      data: {message: "Access Denied"},
     });
   }
 
@@ -105,18 +105,18 @@ const refreshToken = async (req, res) => {
     if (!user || user.refreshToken !== refreshToken) {
       return res.status(403).json({
         status: "fail",
-        data: { message: "Invalid refresh token" },
+        data: {message: "Invalid refresh token"},
       });
     }
     const newAccessToken = generateAccessToken(user);
     res.json({
       status: "success",
-      data: { accessToken: newAccessToken },
+      data: {accessToken: newAccessToken},
     });
   } catch (err) {
     res.status(400).json({
       status: "fail",
-      data: { message: "Invalid refresh token" },
+      data: {message: "Invalid refresh token"},
     });
   }
 };

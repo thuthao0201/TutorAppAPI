@@ -10,16 +10,44 @@ const sessionSchema = new mongoose.Schema(
       type: Number,
       default: 120,
     },
-    startTime: {
+    tutorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tutor",
+      required: true,
+    },
+    studentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Student",
+      required: true,
+    },
+    startDate: {
       type: Date,
       required: true,
     },
-    endTime: {
+    endDate: {
       type: Date,
       required: true,
+    },
+    time: {
+      type: String,
+      required: true,
+      enum: ["7:00-9:00", "9:30-11:30", "13:00-15:00", "15:30-17:30", "19:00-21:00"],
+    },
+    subject: {
+      type: String,
+      required: true,
+    },
+    grade: {
+      type: String,
+      required: true,
+    },
+    requirements: {
+      type: String,
     },
   },
   {
     timestamps: true,
   }
 );
+
+module.exports = mongoose.model("Session", sessionSchema);

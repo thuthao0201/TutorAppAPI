@@ -8,9 +8,11 @@ const {
   cancelBooking,
 } = require("../controllers/booking.controller");
 
-router.get("/:id", getBooking);
+const { isOwnerOrAdmin } = require("../middlewares/role.middleware");
+
+router.get("/:id", isOwnerOrAdmin, getBooking);
 router.get("/", getBookings);
-router.patch("/:id", updateBooking);
-router.delete("/:id", cancelBooking);
+router.patch("/:id", isOwnerOrAdmin, updateBooking);
+router.delete("/:id", isOwnerOrAdmin, cancelBooking);
 
 module.exports = router;

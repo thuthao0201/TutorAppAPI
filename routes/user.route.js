@@ -7,11 +7,12 @@ const {
   updateUser,
   deleteUser,
 } = require("../controllers/user.controller");
+const { isAdmin, isOwnerOrAdmin } = require("../middlewares/role.middleware");
 
-router.post("/", createUser);
-router.get("/:id", getUser);
-router.get("/", getUsers);
-router.patch("/:id", updateUser);
-router.delete("/:id", deleteUser);
+router.post("/", isAdmin, createUser);
+router.get("/:id", isOwnerOrAdmin, getUser);
+router.get("/", isAdmin, getUsers);
+router.patch("/:id", isOwnerOrAdmin, updateUser);
+router.delete("/:id", isAdmin, deleteUser);
 
 module.exports = router;

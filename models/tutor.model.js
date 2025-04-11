@@ -34,30 +34,28 @@ const tutorSchema = new mongoose.Schema({
       },
       grades: {
         type: [String],
+        enum: [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12",
+        ],
       },
     },
   ],
-  // schedule: [
-  //   {
-  //     day: {
-  //       type: String,
-  //     },
-  //     time: {
-  //       type: String,
-  //     },
-  //   },
-  // ],
-  // Ko can lich tuy chinh nua, chuyen sang lich co dinh
-  // schedule: {
-  //   type: Map, // Mỗi ngày sẽ có danh sách các ca học (VD: { "Monday": ["08:00-10:00", "14:00-16:00"] })
-  //   of: [String], // Mỗi ngày sẽ có danh sách các ca đã nhận (VD: ["08:00-10:00", "14:00-16:00"])
-  //   default: {},
-  // },
   experiences: {
     //Kinh nghiem và thành tích
     type: String,
   },
-  price: {
+  sessionPrice: {
     type: Number,
     default: 50000,
   },
@@ -65,11 +63,6 @@ const tutorSchema = new mongoose.Schema({
     //Danh gia trung binh
     type: Number,
     default: 0,
-  },
-  reviews: {
-    //Danh sach danh gia
-    type: [mongoose.Schema.Types.ObjectId],
-    ref: "Review",
   },
   recentReviews: {
     //Danh sach danh gia gan day
@@ -81,6 +74,6 @@ const tutorSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-});
+}, {timestamps: true});
 
 module.exports = mongoose.model("Tutor", tutorSchema);
