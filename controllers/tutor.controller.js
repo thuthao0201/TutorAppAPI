@@ -14,11 +14,13 @@ const createTutor = async (req, res) => {
         data: {email: "Email already exists"},
       });
     }
+    const avatar = req.file.path;
     const passwordHash = await hashPassword(password);
     const user = await User.create({
       ...req.body,
       password: passwordHash,
       role: "tutor",
+      avatar,
     });
 
     const tutor = new Tutor({...req.body, userId: user._id});
@@ -38,13 +40,13 @@ const createTutor = async (req, res) => {
 // Thêm pagination và filter cho getTutors
 const getTutors = async (req, res) => {
   try {
-    const Tutors = await Tutor.find({}).populate(
+    const tutors = await Tutor.find({}).populate(
       "userId",
       "name email phone avatar"
     );
     res.json({
       status: "success",
-      data: Tutors,
+      data: tutors,
     });
   } catch (error) {
     res.status(500).json({

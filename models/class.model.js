@@ -36,7 +36,7 @@ const classSchema = new mongoose.Schema(
     status: {
       type: String,
       default: "pending",
-      enum: ["pending", "matched", "waiting", "rejected", "canceled"],
+      enum: ["pending", "matched", "waiting", "canceled"],
     },
     sessionId: {
       type: mongoose.Schema.Types.ObjectId,

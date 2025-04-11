@@ -1,5 +1,6 @@
 const Booking = require("../models/booking.model");
 const Tutor = require("../models/tutor.model");
+const Session = require("../models/session.model"); // Add Session model
 
 // Xem lai thoi gian dat lich duoi dang nhu nao
 // Lam the nao de co the check duoc ca cac ngay dua tren ngay bat dau va ket thuc
@@ -7,8 +8,8 @@ const Tutor = require("../models/tutor.model");
 const createBooking = async (req, res) => {
   try {
     const tutorId = req.params.tutorId;
-    const userId = req.user._id;
-    const { time, day, weekly, startDate, endDate } = req.body;
+    const studentId = req.user._id;
+    const {subject, grade, time, day, startDate, endDate, requirements} = req.body;
     const availableSlots = [
       "07:00-09:00",
       "09:30-11:30",
@@ -16,12 +17,14 @@ const createBooking = async (req, res) => {
       "15:30-17:30",
       "18:00-20:00",
     ];
+
     if (!availableSlots.includes(time)) {
       return res.status(400).json({
         status: "fail",
         message: "Thời gian đặt lịch không hợp lệ. Vui lòng chọn ca học hợp lệ",
       });
     }
+
     const tutor = await Tutor.findById(tutorId);
     if (!tutor) {
       return res.status(404).json({
@@ -29,27 +32,65 @@ const createBooking = async (req, res) => {
         message: "Không tìm thấy gia sư",
       });
     }
-    const bookedSlots = tutor.schedule[day] || [];
-    if (bookedSlots.includes(time)) {
+
+    // Check for session conflicts
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    // Find all sessions that overlap with the requested time period
+    const overlappingSessions = await Session.find({
+      tutorId,
+      day,
+      time,
+      $or: [
+        // Sessions that start during our range
+        {
+          startDate: {$lte: end},
+          endDate: {$gte: start}
+        }
+      ]
+    });
+
+    if (overlappingSessions.length > 0) {
       return res.status(400).json({
         status: "fail",
-        message: "Ca học đã được đặt. Vui lòng chọn ca học khác",
+        message: "Đã có buổi học trùng vào ca này trong khoảng thời gian bạn chọn. Vui lòng chọn ca học khác.",
       });
     }
-    bookedSlots.push(time);
-    tutor.schedule[day] = bookedSlots;
-    await tutor.save(); // Lưu lại thông tin ca học đã đặt của gia sư
 
-    const booking = new Booking({
+    // Create a new session for the booking
+    const session = new Session({
       tutorId,
-      userId,
+      studentId,
+      subject,
+      grade,
       time,
       day,
-      weekly,
       startDate,
       endDate,
+      requirements
     });
-    await booking.save(); // Lưu lịch hẹn vào cơ sở dữ liệu theo thông tin từ req.body
+
+    await session.save();
+    await tutor.save();
+
+    // Create booking with session reference
+    const booking = new Booking({
+      tutorId,
+      userId: studentId,
+      time,
+      day,
+      startDate,
+      endDate,
+      sessionId: session._id,
+      status: "accepted",
+      subject,
+      grade,
+      requirements
+    });
+
+    await booking.save();
+
     res.status(201).json({
       status: "success",
       data: booking,
@@ -80,8 +121,8 @@ const getBookings = async (req, res) => {
 const getBookingsOfTutor = async (req, res) => {
   try {
     const userId = req.user._id;
-    const tutor = await Tutor.findOne({ userId });
-    const bookings = await Booking.find({ tutorId: tutor._id });
+    const tutor = await Tutor.findOne({userId});
+    const bookings = await Booking.find({tutorId: tutor._id});
     res.json({
       status: "success",
       data: bookings,
@@ -97,7 +138,7 @@ const getBookingsOfTutor = async (req, res) => {
 const getBookingsOfUser = async (req, res) => {
   try {
     const userId = req.user._id;
-    const bookings = await Booking.find({ userId });
+    const bookings = await Booking.find({userId});
     res.json({
       status: "success",
       data: bookings,
@@ -167,15 +208,8 @@ const cancelBooking = async (req, res) => {
         message: "Không tìm thấy lịch hẹn",
       });
     }
-    const tutor = await Tutor.findById(booking.tutorId);
-    const bookedSlots = tutor.schedule.get(booking.day) || [];
-    tutor.schedule.set(
-      booking.day,
-      bookedSlots.filter((slot) => slot !== booking.time)
-    );
-    await tutor.save();
 
-    await booking.deleteOne();
+    // await booking.deleteOne();
     res.json({
       status: "success",
       message: "Hủy lịch hẹn thành công",

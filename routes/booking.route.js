@@ -8,7 +8,7 @@ const {
   cancelBooking,
 } = require("../controllers/booking.controller");
 
-const { isOwnerOrAdmin } = require("../middlewares/role.middleware");
+const {isOwnerOrAdmin} = require("../middlewares/role.middleware");
 
 router.get("/:id", isOwnerOrAdmin, getBooking);
 router.get("/", getBookings);
