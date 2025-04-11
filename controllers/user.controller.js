@@ -1,10 +1,10 @@
 const User = require("../models/user.model");
-const { hashPassword, comparePassword } = require("../utils/auth.util");
+const {hashPassword, comparePassword} = require("../utils/auth.util");
 
 const createUser = async (req, res) => {
   try {
     const password = await hashPassword(req.body.password);
-    const user = new User({ ...req.body, password });
+    const user = new User({...req.body, password});
     await user.save();
     res.status(201).json({
       status: "success",
@@ -104,7 +104,7 @@ const deleteUser = async (req, res) => {
   }
 };
 
-const getInfomation = async (req, res) => {
+const getInformation = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select(
       "-password -__v -createdAt -updatedAt"
@@ -164,8 +164,8 @@ const changeInformation = async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { ...req.body },
-      { new: true, runValidators: true }
+      {...req.body},
+      {new: true, runValidators: true}
     );
     if (!user) {
       return res.status(404).json({
@@ -186,13 +186,41 @@ const changeInformation = async (req, res) => {
   }
 };
 
+const changeAvatar = async (req, res) => {
+  try {
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      {avatar: req.file.path},
+      {new: true, runValidators: true}
+    );
+    if (!user) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Không tìm thấy người dùng",
+      });
+    }
+    res.json({
+      status: "success",
+      data: user,
+    });
+  } catch (error) {
+    res.status(400).json({
+      status: "error",
+      message:
+        "Có lỗi xảy ra khi cập nhật thông tin người dùng: " + error.message,
+    });
+  }
+}
+
+
 module.exports = {
   createUser,
   getUsers,
   getUser,
   updateUser,
   deleteUser,
-  getInfomation,
+  getInformation,
   changePassword,
   changeInformation,
+  changeAvatar
 };

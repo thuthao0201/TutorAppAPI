@@ -36,6 +36,16 @@ const isOwnerOrAdmin = async (req, res, next) => {
     const userId = req.params.id || req.body.userId;
     if (req.user.role === 'admin' || req.user._id.toString() === userId.toString()) {
       next();
+    } else if (req.user.role === 'tutor') {
+      const tutor = await Tutor.findOne({userId: userId});
+      if (tutor && tutor.userId.toString() === req.user._id.toString()) {
+        next();
+      } else {
+        return res.status(403).json({
+          status: 'fail',
+          message: 'Bạn không có quyền thực hiện hành động này',
+        });
+      }
     } else {
       return res.status(403).json({
         status: 'fail',
