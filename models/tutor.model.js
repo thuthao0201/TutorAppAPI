@@ -51,6 +51,18 @@ const tutorSchema = new mongoose.Schema({
       },
     },
   ],
+  availableSchedule: [
+    {
+      day: {
+        type: String,
+        enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      },
+      timeSlots: {
+        type: [String],
+        enum: ["7:00-9:00", "9:30-11:30", "13:00-15:00", "15:30-17:30", "19:00-21:00"],
+      },
+    }
+  ],
   experiences: {
     //Kinh nghiem và thành tích
     type: String,
@@ -64,15 +76,40 @@ const tutorSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  totalReviews: {
+    //Tong so danh gia
+    type: Number,
+    default: 0,
+  },
+  totalStar: {
+    //Tong so sao
+    type: Number,
+    default: 0,
+  },
+  totalSessions: {
+    //Tong so buoi hoc
+    type: Number,
+    default: 0,
+  },
   recentReviews: {
     //Danh sach danh gia gan day
     type: [mongoose.Schema.Types.ObjectId],
     ref: "Review",
   },
-  totalReviews: {
-    //Tong so danh gia
+  trustScore: {
+    type: Number,
+    default: 100,
+    min: 0,
+    max: 100,
+  },
+  completedSessions: {
     type: Number,
     default: 0,
+  },
+  consecutiveCompletedSessions: {
+    type: Number,
+    default: 0,
+    // Số buổi học thành công liên tiếp
   },
 }, {timestamps: true});
 
