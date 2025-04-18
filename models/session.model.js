@@ -4,7 +4,7 @@ const sessionSchema = new mongoose.Schema(
   {
     roomId: {
       type: String,
-      required: true,
+      // required: true,
     },
     duration: {
       type: Number,
@@ -17,7 +17,7 @@ const sessionSchema = new mongoose.Schema(
     },
     studentId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Student",
+      ref: "User",
       required: true,
     },
     startDate: {
@@ -31,13 +31,29 @@ const sessionSchema = new mongoose.Schema(
     time: {
       type: String,
       required: true,
-      enum: ["7:00-9:00", "9:30-11:30", "13:00-15:00", "15:30-17:30", "19:00-21:00"],
+      enum: [
+        "7:00-9:00",
+        "9:30-11:30",
+        "13:00-15:00",
+        "15:30-17:30",
+        "19:00-21:00",
+      ],
     },
-    day: {
-      type: String,
-      required: true,
-      enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-    },
+    day: [
+      {
+        type: String,
+        required: true,
+        enum: [
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+          "Sunday",
+        ],
+      },
+    ],
     subject: {
       type: String,
       required: true,

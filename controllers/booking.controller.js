@@ -7,18 +7,22 @@ const Session = require("../models/session.model"); // Add Session model
 // Xac dinh lai bai toan ve thoi gian dat lich
 const createBooking = async (req, res) => {
   try {
-    const tutorId = req.params.tutorId;
+    const tutorId = req.params.id;
     const studentId = req.user._id;
-    const {subject, grade, time, day, startDate, endDate, requirements} = req.body;
+    const { subject, grade, time, day, startDate, endDate, requirements } =
+      req.body;
+
     const availableSlots = [
-      "07:00-09:00",
-      "09:30-11:30",
+      "7:00-9:00",
+      "9:30-11:30",
       "13:00-15:00",
       "15:30-17:30",
-      "18:00-20:00",
+      "19:00-21:00",
     ];
 
-    if (!availableSlots.includes(time)) {
+    console.log(time);
+
+    if (!availableSlots.find((availableTime) => availableTime === time)) {
       return res.status(400).json({
         status: "fail",
         message: "Thời gian đặt lịch không hợp lệ. Vui lòng chọn ca học hợp lệ",
@@ -33,28 +37,45 @@ const createBooking = async (req, res) => {
       });
     }
 
-    // Check for session conflicts
     const start = new Date(startDate);
     const end = new Date(endDate);
 
     // Find all sessions that overlap with the requested time period
     const overlappingSessions = await Session.find({
-      tutorId,
-      day,
+      $or: [
+        {
+          tutorId: tutorId,
+          studentId: studentId,
+        },
+      ],
+      // Kiểm tra ngày của session có chứa 1 ngày nào đó trong day truyền vào không
+      $expr: {
+        $in: [
+          { $dayOfWeek: "$day" },
+          {
+            $map: {
+              input: day,
+              as: "d",
+              in: { $indexOfArray: ["$day", "$$d"] },
+            },
+          },
+        ],
+      },
       time,
       $or: [
         // Sessions that start during our range
         {
-          startDate: {$lte: end},
-          endDate: {$gte: start}
-        }
-      ]
+          startDate: { $lte: end },
+          endDate: { $gte: start },
+        },
+      ],
     });
 
     if (overlappingSessions.length > 0) {
       return res.status(400).json({
         status: "fail",
-        message: "Đã có buổi học trùng vào ca này trong khoảng thời gian bạn chọn. Vui lòng chọn ca học khác.",
+        message:
+          "Đã có buổi học trùng vào ca này trong khoảng thời gian bạn chọn. Vui lòng chọn ca học khác.",
       });
     }
 
@@ -66,9 +87,9 @@ const createBooking = async (req, res) => {
       grade,
       time,
       day,
-      startDate,
-      endDate,
-      requirements
+      startDate: start,
+      endDate: end,
+      requirements,
     });
 
     await session.save();
@@ -77,16 +98,16 @@ const createBooking = async (req, res) => {
     // Create booking with session reference
     const booking = new Booking({
       tutorId,
-      userId: studentId,
+      studentId,
       time,
       day,
-      startDate,
-      endDate,
+      startDate: start,
+      endDate: end,
       sessionId: session._id,
       status: "accepted",
       subject,
       grade,
-      requirements
+      requirements,
     });
 
     await booking.save();
@@ -121,8 +142,8 @@ const getBookings = async (req, res) => {
 const getBookingsOfTutor = async (req, res) => {
   try {
     const userId = req.user._id;
-    const tutor = await Tutor.findOne({userId});
-    const bookings = await Booking.find({tutorId: tutor._id});
+    const tutor = await Tutor.findOne({ userId });
+    const bookings = await Booking.find({ tutorId: tutor._id });
     res.json({
       status: "success",
       data: bookings,
@@ -138,7 +159,7 @@ const getBookingsOfTutor = async (req, res) => {
 const getBookingsOfUser = async (req, res) => {
   try {
     const userId = req.user._id;
-    const bookings = await Booking.find({userId});
+    const bookings = await Booking.find({ userId });
     res.json({
       status: "success",
       data: bookings,
