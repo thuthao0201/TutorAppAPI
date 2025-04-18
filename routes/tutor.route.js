@@ -16,16 +16,20 @@ const {
   getReviewsByTutor,
 } = require("../controllers/review.controller");
 
+const {addFavorite, removeFavorite} = require("../controllers/favorite.controller");
+
 const {createBooking} = require("../controllers/booking.controller");
 const upload = require("../configs/multer");
 
-router.post("/:id/reviews", reviewTutor);
-router.post("/:id/bookings", createBooking);
+router.post("/:tutorId/reviews", reviewTutor);
+router.post("/:tutorId/bookings", createBooking);
 router.post("/", isAdmin, upload.single("avatar"), createTutor);
-router.get("/:id", getTutor);
+router.post("/:tutorId/favorite", addFavorite);
+router.get("/:tutorId", getTutor);
 router.get("/:tutorId/reviews", getReviewsByTutor);
 router.get("/", getTutors);
-router.patch("/:id", isOwnerOrAdmin, updateTutor);
-router.delete("/:id", isAdmin, deleteTutor);
+router.patch("/:tutorId", isOwnerOrAdmin, updateTutor);
+router.delete("/:tutorId/favorite", removeFavorite);
+router.delete("/:tutorId", isAdmin, deleteTutor);
 
 module.exports = router;

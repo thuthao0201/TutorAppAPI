@@ -2,12 +2,13 @@ const Class = require("../models/class.model");
 const Tutor = require("../models/tutor.model");
 const Booking = require("../models/booking.model");
 const Session = require("../models/session.model");
+const User = require("../models/user.model");
 
 // Tạo lớp mới từ học viên
 const createClass = async (req, res) => {
   try {
     const studentId = req.user._id;
-    const {subject, grade, time, day, startDate, endDate, requirements} = req.body;
+    const {subject, grade, time, day, startDate, endDate, requirements, expectedPrice} = req.body;
 
     // Kiểm tra thời gian hợp lệ
     const availableSlots = [
@@ -39,37 +40,20 @@ const createClass = async (req, res) => {
     });
 
     if (tutors.length === 0) {
-      // Nếu không có giảng viên dạy môn học này
-      const newClass = new Class({
-        subject,
-        grade,
-        studentId,
-        time,
-        day: dayArray,
-        startDate,
-        endDate,
-        requirements,
-        status: "pending"
-      });
-
-      await newClass.save();
-
       return res.status(201).json({
         status: "success",
         message: "Không tìm thấy giảng viên dạy môn học này. Vui lòng thử môn học khác.",
-        data: {
-          class: newClass
-        }
       });
     }
 
-    // Kiểm tra xung đột lịch giảng viên
-    const availableTutor = await checkTutorAvailability(tutors, time, dayArray, startDate, endDate);
+    // Kiểm tra xung đột lịch giảng viên và giá cả
+    const availableTutor = await checkTutorAvailability(tutors, studentId, time, dayArray, startDate, endDate, expectedPrice);
 
     if (availableTutor) {
       // Tạo session mới cho lớp học
       const newSession = new Session({
         tutorId: availableTutor._id,
+        studentId: studentId,
         time,
         day: dayArray,
         startDate,
@@ -79,7 +63,7 @@ const createClass = async (req, res) => {
 
       await newSession.save();
 
-      // Tạo lớp học với trạng thái matched
+      // Tạo lớp học với trạng thái matched và gắn session
       const newClass = new Class({
         subject,
         grade,
@@ -90,28 +74,76 @@ const createClass = async (req, res) => {
         startDate,
         endDate,
         requirements,
+        expectedPrice: expectedPrice || 0,
         sessionId: newSession._id,
         status: "matched"
       });
 
-      await newClass.save();
+      const getWeekdayDatesInRange = (startDate, endDate, weekdays) => {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        const dates = [];
 
-      // Tạo booking tương ứng
-      const booking = new Booking({
-        tutorId: availableTutor._id,
-        userId: studentId,
-        time,
-        day: dayArray,
-        startDate,
-        endDate,
-        requirements,
-        status: "accepted"
-      });
+        // Map day strings to day numbers (0 = Sunday, 1 = Monday, etc.)
+        const dayMapping = {
+          'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+          'thursday': 4, 'friday': 5, 'saturday': 6
+        };
 
-      await booking.save();
+        // Convert weekday strings to day numbers
+        const dayNumbers = weekdays.map(day => dayMapping[day.toLowerCase()]);
 
-      // Cập nhật lớp với booking ID
-      newClass.bookingId = booking._id;
+        // Clone the start date
+        const current = new Date(start);
+
+        // Iterate through each date in the range
+        while (current <= end) {
+          const dayOfWeek = current.getDay();
+
+          // If current day is in our weekdays list, add it
+          if (dayNumbers.includes(dayOfWeek)) {
+            dates.push(new Date(current));
+          }
+
+          // Move to next day
+          current.setDate(current.getDate() + 1);
+        }
+
+        return dates;
+      };
+
+      // Lấy tất cả các ngày trong khoảng thời gian đã chọn
+      const requestedDates = getWeekdayDatesInRange(startDate, endDate, dayArray);
+
+      // Trừ tiền từ tài khoản học viên 
+      const student = await User.findById(studentId);
+      if (student.balance < expectedPrice * requestedDates.length) {
+        return res.status(400).json({
+          status: "fail",
+          message: "Số dư tài khoản không đủ để thanh toán lớp học này",
+        });
+      }
+      student.balance -= expectedPrice * requestedDates.length;
+      await student.save();
+
+      const tutorAvailable = await Tutor.findById(availableTutor._id);
+      if (!tutorAvailable) {
+        return res.status(404).json({
+          status: "fail",
+          message: "Không tìm thấy thông tin giảng viên",
+        });
+      }
+
+      const userTutor = await User.findById(tutorAvailable.userId);
+      if (!userTutor) {
+        return res.status(404).json({
+          status: "fail",
+          message: "Không tìm thấy thông tin người dùng giảng viên",
+        });
+      }
+
+      userTutor.pendingBalance += expectedPrice * requestedDates.length;
+      await userTutor.save();
       await newClass.save();
 
       return res.status(201).json({
@@ -123,46 +155,23 @@ const createClass = async (req, res) => {
         }
       });
     } else {
-      // Tạo lớp mới với trạng thái pending
-      const newClass = new Class({
-        subject,
-        grade,
-        studentId,
-        time,
-        day: dayArray,
-        startDate,
-        endDate,
-        requirements,
-        status: "pending"
-      });
-
-      await newClass.save();
-
-      // Tìm các thời gian thay thế
-      const alternativeTimes = await findAlternativeTimes(subject, grade, dayArray);
+      // Không tạo lớp khi không tìm thấy giảng viên phù hợp
+      // Thay vào đó, tìm các thời gian thay thế và trả về
+      const alternativeTimes = await findAlternativeTimes(subject, grade, dayArray, expectedPrice, studentId, time);
 
       if (alternativeTimes.length > 0) {
-        // Cập nhật lớp với các thời gian thay thế
-        newClass.alternativeTimes = alternativeTimes;
-        newClass.status = "waiting";
-        await newClass.save();
-
-        return res.status(201).json({
+        return res.status(200).json({
           status: "success",
           message: "Không tìm thấy giảng viên phù hợp cho thời gian bạn chọn. Vui lòng xem xét các thời gian thay thế.",
           data: {
-            class: newClass,
             alternativeTimes
           }
         });
       } else {
         // Không tìm thấy giảng viên và không có thời gian thay thế
-        return res.status(201).json({
+        return res.status(200).json({
           status: "success",
-          message: "Không tìm thấy giảng viên phù hợp. Vui lòng thử lại sau hoặc chọn thời gian khác.",
-          data: {
-            class: newClass
-          }
+          message: "Không tìm thấy giảng viên phù hợp. Vui lòng thử lại sau hoặc chọn thời gian khác."
         });
       }
     }
@@ -175,54 +184,121 @@ const createClass = async (req, res) => {
 };
 
 // Hàm kiểm tra xung đột lịch của giảng viên
-const checkTutorAvailability = async (tutors, time, days, startDate, endDate) => {
+const checkTutorAvailability = async (tutors, studentId, time, days, startDate, endDate, expectedPrice) => {
   try {
-    for (const tutor of tutors) {
-      // Kiểm tra các session hiện có của giảng viên
+    // Helper function to get all occurrences of specific weekdays within a date range
+    const getWeekdayDatesInRange = (startDate, endDate, weekdays) => {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const dates = [];
+
+      // Map day strings to day numbers (0 = Sunday, 1 = Monday, etc.)
+      const dayMapping = {
+        'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+        'thursday': 4, 'friday': 5, 'saturday': 6
+      };
+
+      // Convert weekday strings to day numbers
+      const dayNumbers = weekdays.map(day => dayMapping[day.toLowerCase()]);
+
+      // Clone the start date
+      const current = new Date(start);
+
+      // Iterate through each date in the range
+      while (current <= end) {
+        const dayOfWeek = current.getDay();
+
+        // If current day is in our weekdays list, add it
+        if (dayNumbers.includes(dayOfWeek)) {
+          dates.push(new Date(current));
+        }
+
+        // Move to next day
+        current.setDate(current.getDate() + 1);
+      }
+
+      return dates;
+    };
+
+    // Get actual calendar dates for the requested class
+    const requestedDates = getWeekdayDatesInRange(startDate, endDate, days);
+
+    // If no specific dates match the criteria, there's nothing to book
+    if (requestedDates.length === 0) {
+      return null;
+    }
+
+    // Filter tutors based on price first if expectedPrice is set
+    let eligibleTutors = tutors;
+    if (expectedPrice > 0) {
+      eligibleTutors = tutors.filter(tutor => tutor.sessionPrice <= expectedPrice);
+    }
+
+    // No tutors meet the price criteria
+    if (eligibleTutors.length === 0) {
+      return null;
+    }
+
+    // For each tutor, check if they have available schedule and no conflicts
+    const availableTutors = [];
+
+    for (const tutor of eligibleTutors) {
+      // Check if tutor's availableSchedule includes the requested days and time
+      const hasAvailableSchedule = days.every(day => {
+        const daySchedule = tutor.availableSchedule.find(schedule => schedule.day === day);
+        return daySchedule && daySchedule.timeSlots.includes(time);
+      });
+
+      if (!hasAvailableSchedule) {
+        continue;
+      }
+
+      // Find all sessions that might conflict for this tutor
+      const potentialConflictSessions = await Session.find({
+        $or: [{
+          studentId: studentId,
+          tutorId: tutor._id
+        }],
+        time: time,
+        status: "active"
+      });
+
+      // Check for actual conflicts on specific dates
       let hasConflict = false;
+      for (const session of potentialConflictSessions) {
+        // Get actual calendar dates for the existing session
+        const sessionDates = getWeekdayDatesInRange(
+          session.startDate,
+          session.endDate,
+          session.day
+        );
 
-      for (const day of days) {
-        const conflictingSessions = await Session.find({
-          tutorId: tutor._id,
-          day: {$in: [day]}, // Kiểm tra xem ngày này có trong mảng day không
-          time: time,
-          $or: [
-            // Kiểm tra các trường hợp xung đột:
-            // 1. Session hiện tại chồng lên session mới hoàn toàn
-            {
-              startDate: {$lte: startDate},
-              endDate: {$gte: endDate}
-            },
-            // 2. Session mới chồng lên session hiện tại hoàn toàn
-            {
-              startDate: {$gte: startDate},
-              endDate: {$lte: endDate}
-            },
-            // 3. Ngày bắt đầu của session hiện tại nằm trong khoảng thời gian session mới
-            {
-              startDate: {$gte: startDate, $lte: endDate}
-            },
-            // 4. Ngày kết thúc của session hiện tại nằm trong khoảng thời gian session mới
-            {
-              endDate: {$gte: startDate, $lte: endDate}
-            }
-          ]
-        });
+        // Check if any specific dates overlap
+        const conflictingDates = requestedDates.filter(reqDate =>
+          sessionDates.some(sessDate =>
+            reqDate.getFullYear() === sessDate.getFullYear() &&
+            reqDate.getMonth() === sessDate.getMonth() &&
+            reqDate.getDate() === sessDate.getDate()
+          )
+        );
 
-        if (conflictingSessions.length > 0) {
+        if (conflictingDates.length > 0) {
           hasConflict = true;
           break;
         }
       }
 
+      // If no conflicts, add to available tutors
       if (!hasConflict) {
-        // Nếu không có xung đột lịch, giảng viên này có thể dạy
-        return tutor;
+        availableTutors.push(tutor);
       }
     }
 
-    // Không tìm thấy giảng viên phù hợp
-    return null;
+    // Sort tutors by trustScore (highest first)
+    availableTutors.sort((a, b) => b.trustScore - a.trustScore);
+
+    // Return the best matching tutor (highest trustScore)
+    return availableTutors.length > 0 ? availableTutors[0] : null;
   } catch (error) {
     console.error("Lỗi khi kiểm tra lịch giảng viên:", error);
     return null;
@@ -271,7 +347,7 @@ const findAvailableTutors = async (subject, grade, time, days) => {
 };
 
 // Hàm tìm các thời gian thay thế
-const findAlternativeTimes = async (subject, grade, preferredDays) => {
+const findAlternativeTimes = async (subject, grade, preferredDays, expectedPrice, studentId, preferredTime) => {
   try {
     const availableSlots = [
       "7:00-9:00",
@@ -285,7 +361,47 @@ const findAlternativeTimes = async (subject, grade, preferredDays) => {
       "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
     ];
 
-    const alternativeTimes = [];
+    // Cấu trúc dữ liệu cho các thời gian thay thế, phân loại theo mức độ ưu tiên
+    const alternatives = {
+      sameDayDifferentTime: [],     // Cùng ngày, khác ca
+      sameTimeDifferentDay: [],     // Cùng ca, khác ngày
+      sameDayTimeHigherPrice: [],   // Cùng ngày và ca nhưng giá cao hơn
+      otherOptions: []              // Các lựa chọn khác
+    };
+
+    // Helper function to get all occurrences of specific weekdays within a date range
+    const getWeekdayDatesInRange = (startDate, endDate, weekdays) => {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const dates = [];
+
+      // Map day strings to day numbers (0 = Sunday, 1 = Monday, etc.)
+      const dayMapping = {
+        'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
+        'thursday': 4, 'friday': 5, 'saturday': 6
+      };
+
+      // Convert weekday strings to day numbers
+      const dayNumbers = weekdays.map(day => dayMapping[day.toLowerCase()]);
+
+      // Clone the start date
+      const current = new Date(start);
+
+      // Iterate through each date in the range
+      while (current <= end) {
+        const dayOfWeek = current.getDay();
+
+        // If current day is in our weekdays list, add it
+        if (dayNumbers.includes(dayOfWeek)) {
+          dates.push(new Date(current));
+        }
+
+        // Move to next day
+        current.setDate(current.getDate() + 1);
+      }
+
+      return dates;
+    };
 
     // Tìm giảng viên có thể dạy môn học và cấp độ này
     const tutors = await Tutor.find({
@@ -297,68 +413,145 @@ const findAlternativeTimes = async (subject, grade, preferredDays) => {
       }
     });
 
+    // Không lọc giảng viên theo giá ngay từ đầu
+    const eligibleTutors = tutors;
+
+    // Lấy tất cả các session hiện tại của học viên để kiểm tra xung đột
+    const studentSessions = await Session.find({
+      studentId: studentId,
+      status: "active"
+    });
+
     // Kiểm tra từng giảng viên
-    for (const tutor of tutors) {
-      // Kiểm tra các khung giờ khác
-      for (const time of availableSlots) {
-        // Kiểm tra các ngày đã chọn trước
-        for (const day of preferredDays) {
-          const bookedSlots = tutor.schedule && tutor.schedule[day] ? tutor.schedule[day] : [];
+    for (const tutor of eligibleTutors) {
+      // Tạo danh sách các khung giờ và ngày mà giảng viên này có thể dạy dựa trên availableSchedule
+      const tutorAvailableSlots = [];
 
-          if (!bookedSlots.includes(time)) {
-            // Thêm vào danh sách thời gian thay thế
-            const existingAlternative = alternativeTimes.find(
-              alt => alt.time === time && alt.days.includes(day) && alt.tutorId.equals(tutor._id)
-            );
+      for (const day of allDays) {
+        const daySchedule = tutor.availableSchedule.find(schedule => schedule.day === day);
+        if (daySchedule) {
+          for (const timeSlot of daySchedule.timeSlots) {
+            tutorAvailableSlots.push({day, time: timeSlot});
+          }
+        }
+      }
 
-            if (existingAlternative) {
-              // Nếu đã có thời gian này với giảng viên này, thêm ngày vào
-              if (!existingAlternative.days.includes(day)) {
-                existingAlternative.days.push(day);
-              }
-            } else {
-              // Thêm mới
-              alternativeTimes.push({
-                time,
-                days: [day],
-                tutorId: tutor._id
-              });
-            }
+      // Lấy tất cả các session hiện tại của giảng viên để kiểm tra xung đột
+      const tutorSessions = await Session.find({
+        tutorId: tutor._id,
+        status: "active"
+      });
+
+      // Kiểm tra từng khung giờ có sẵn
+      for (const slot of tutorAvailableSlots) {
+        // Đánh dấu slot là ngày ưu tiên và ca ưu tiên
+        const isPreferredDay = preferredDays.includes(slot.day);
+        const isPreferredTime = slot.time === preferredTime;
+        const isPriceWithinBudget = expectedPrice === 0 || tutor.sessionPrice <= expectedPrice;
+
+        // Kiểm tra xem slot này có xung đột với session của giảng viên không
+        let hasTutorConflict = false;
+        for (const session of tutorSessions) {
+          if (session.time === slot.time && session.day.includes(slot.day)) {
+            hasTutorConflict = true;
+            break;
           }
         }
 
-        // Kiểm tra các ngày khác
-        const otherDays = allDays.filter(day => !preferredDays.includes(day));
+        // Kiểm tra xem slot này có xung đột với session của học viên không
+        let hasStudentConflict = false;
+        for (const session of studentSessions) {
+          if (session.time === slot.time && session.day.includes(slot.day)) {
+            hasStudentConflict = true;
+            break;
+          }
+        }
 
-        for (const day of otherDays) {
-          const bookedSlots = tutor.schedule && tutor.schedule[day] ? tutor.schedule[day] : [];
+        // Thêm vào danh sách thời gian thay thế nếu không có xung đột cho cả giảng viên và học viên
+        if (!hasTutorConflict && !hasStudentConflict) {
+          const alternativeOption = {
+            time: slot.time,
+            days: [slot.day],
+            tutorId: tutor._id,
+            sessionPrice: tutor.sessionPrice,
+            tutorName: tutor.userId?.name || "Gia sư",
+            isPreferredDay,
+            isPreferredTime,
+            isPriceWithinBudget,
+            trustScore: tutor.trustScore || 0
+          };
 
-          if (!bookedSlots.includes(time)) {
-            // Thêm vào danh sách thời gian thay thế
-            const existingAlternative = alternativeTimes.find(
-              alt => alt.time === time && alt.days.includes(day) && alt.tutorId.equals(tutor._id)
-            );
-
-            if (existingAlternative) {
-              // Nếu đã có thời gian này với giảng viên này, thêm ngày vào
-              if (!existingAlternative.days.includes(day)) {
-                existingAlternative.days.push(day);
-              }
-            } else {
-              // Thêm mới
-              alternativeTimes.push({
-                time,
-                days: [day],
-                tutorId: tutor._id
-              });
-            }
+          // Phân loại thời gian thay thế theo mức độ ưu tiên
+          if (isPreferredDay && isPreferredTime && !isPriceWithinBudget) {
+            // Cùng ngày và ca nhưng giá cao hơn
+            alternatives.sameDayTimeHigherPrice.push(alternativeOption);
+          } else if (isPreferredDay && !isPreferredTime) {
+            // Cùng ngày, khác ca
+            alternatives.sameDayDifferentTime.push(alternativeOption);
+          } else if (!isPreferredDay && isPreferredTime) {
+            // Cùng ca, khác ngày
+            alternatives.sameTimeDifferentDay.push(alternativeOption);
+          } else {
+            // Các lựa chọn khác
+            alternatives.otherOptions.push(alternativeOption);
           }
         }
       }
     }
 
+    // Gộp các lựa chọn từ các danh sách theo thứ tự ưu tiên
+    let combinedAlternatives = [];
+
+    // Hàm kết hợp các slot có cùng thời gian và cùng giảng viên
+    const combineSlots = (altList) => {
+      const combined = [];
+
+      for (const alt of altList) {
+        const existingIndex = combined.findIndex(item =>
+          item.time === alt.time &&
+          item.tutorId.toString() === alt.tutorId.toString()
+        );
+
+        if (existingIndex !== -1) {
+          // Kết hợp ngày nếu đã có slot với cùng giảng viên và cùng giờ
+          for (const day of alt.days) {
+            if (!combined[existingIndex].days.includes(day)) {
+              combined[existingIndex].days.push(day);
+            }
+          }
+        } else {
+          combined.push({...alt});
+        }
+      }
+
+      return combined;
+    };
+
+    // Sắp xếp từng danh sách và kết hợp các slot
+    // 1. Ưu tiên cùng ngày, khác ca
+    alternatives.sameDayDifferentTime.sort((a, b) => a.sessionPrice - b.sessionPrice);
+    combinedAlternatives = [...combinedAlternatives, ...combineSlots(alternatives.sameDayDifferentTime)];
+
+    // 2. Cùng ca, khác ngày
+    alternatives.sameTimeDifferentDay.sort((a, b) => a.sessionPrice - b.sessionPrice);
+    combinedAlternatives = [...combinedAlternatives, ...combineSlots(alternatives.sameTimeDifferentDay)];
+
+    // 3. Cùng ngày và ca nhưng giá cao hơn
+    alternatives.sameDayTimeHigherPrice.sort((a, b) => a.sessionPrice - b.sessionPrice);
+    combinedAlternatives = [...combinedAlternatives, ...combineSlots(alternatives.sameDayTimeHigherPrice)];
+
+    // 4. Các lựa chọn khác
+    alternatives.otherOptions.sort((a, b) => {
+      // Ưu tiên theo giá, sau đó theo trustScore
+      if (a.sessionPrice !== b.sessionPrice) {
+        return a.sessionPrice - b.sessionPrice;
+      }
+      return b.trustScore - a.trustScore;
+    });
+    combinedAlternatives = [...combinedAlternatives, ...combineSlots(alternatives.otherOptions)];
+
     // Giới hạn số lượng thời gian thay thế
-    return alternativeTimes.slice(0, 5);
+    return combinedAlternatives.slice(0, 10);
   } catch (error) {
     console.error("Lỗi khi tìm thời gian thay thế:", error);
     return [];

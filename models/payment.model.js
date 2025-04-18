@@ -8,7 +8,7 @@ const paymentSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['deposit', 'withdrawal'],
+        enum: ['deposit', 'withdrawal', 'session_payment', 'session_refund', 'tutor_earning'],
         required: true,
     },
     amount: {
@@ -20,6 +20,11 @@ const paymentSchema = new mongoose.Schema({
         enum: ['pending', 'completed', 'failed'],
         default: 'pending',
     },
+    paymentIntentId: {
+        type: String,
+    },
 }, {
     timestamps: true,
 });
+
+module.exports = mongoose.model('Payment', paymentSchema);
