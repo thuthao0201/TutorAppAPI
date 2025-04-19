@@ -1,18 +1,16 @@
 const Tutor = require("../models/tutor.model");
 const User = require("../models/user.model");
 const Favorite = require("../models/favorite.model");
-const {
-  hashPassword
-} = require("../utils/auth.util");
+const { hashPassword } = require("../utils/auth.util");
 
 const createTutor = async (req, res) => {
   try {
-    const {email, password} = req.body;
-    const userExists = await User.exists({email});
+    const { email, password } = req.body;
+    const userExists = await User.exists({ email });
     if (userExists) {
       return res.status(400).json({
         status: "fail",
-        data: {email: "Email already exists"},
+        data: { email: "Email already exists" },
       });
     }
 
@@ -21,7 +19,7 @@ const createTutor = async (req, res) => {
     if (!avatar) {
       return res.status(400).json({
         status: "fail",
-        message: "Vui lòng tải lên ảnh đại diện"
+        message: "Vui lòng tải lên ảnh đại diện",
       });
     }
 
@@ -33,7 +31,7 @@ const createTutor = async (req, res) => {
       avatar,
     });
 
-    const tutor = new Tutor({...req.body, userId: user._id});
+    const tutor = new Tutor({ ...req.body, userId: user._id });
     await tutor.save();
     res.status(201).json({
       status: "success",
@@ -59,8 +57,9 @@ const getTutors = async (req, res) => {
       isFeatured,
       isNew,
       followed,
-      search
+      search,
     } = req.query;
+
     const skip = (page - 1) * limit;
 
     // Xây dựng query để lọc tutors
@@ -71,42 +70,42 @@ const getTutors = async (req, res) => {
       query.subjects = {};
 
       if (subject) {
-        query.subjects.$elemMatch = {subject: subject};
+        query.subjects.$elemMatch = { subject: subject };
       }
 
       if (grade) {
         if (!query.subjects.$elemMatch) {
           query.subjects.$elemMatch = {};
         }
-        query.subjects.$elemMatch.grades = {$in: [grade]};
+        query.subjects.$elemMatch.grades = { $in: [grade] };
       }
     }
 
     // Lọc theo gia sư nổi bật - dựa vào số session đã dạy qua
-    if (isFeatured === 'true') {
+    if (isFeatured === "true") {
       // Lấy gia sư có số buổi dạy từ một ngưỡng nhất định trở lên (ví dụ: 10 buổi)
-      query.completedSessions = {$gte: 10};
+      query.completedSessions = { $gte: 10 };
     }
 
     // Lọc theo gia sư mới (đăng ký trong 30 ngày gần đây)
-    if (isNew === 'true') {
+    if (isNew === "true") {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      query.createdAt = {$gte: thirtyDaysAgo};
+      query.createdAt = { $gte: thirtyDaysAgo };
     }
 
     // Tìm kiếm theo tên gia sư hoặc môn học
     if (search) {
       // Sử dụng aggregation để tìm kiếm
       const userIds = await User.find(
-        {name: {$regex: search, $options: 'i'}, role: 'tutor'},
-        {_id: 1}
+        { name: { $regex: search, $options: "i" }, role: "tutor" },
+        { _id: 1 }
       );
 
       // Tìm theo tên hoặc môn học
       query.$or = [
-        {userId: {$in: userIds.map(user => user._id)}},
-        {'subjects.subject': {$regex: search, $options: 'i'}}
+        { userId: { $in: userIds.map((user) => user._id) } },
+        { "subjects.subject": { $regex: search, $options: "i" } },
       ];
     }
 
@@ -122,45 +121,52 @@ const getTutors = async (req, res) => {
     // Lấy danh sách các tutorId mà user đã follow (nếu user đã đăng nhập)
     let followedTutorIds = [];
     if (req.user) {
-      const favorites = await Favorite.find({studentId: req.user._id});
-      followedTutorIds = favorites.map(fav => fav.tutorId.toString());
+      const favorites = await Favorite.find({ studentId: req.user._id });
+      followedTutorIds = favorites.map((fav) => fav.tutorId.toString());
     }
 
-    if (followed === 'true' && req.user) {
+    if (followed === "true" && req.user) {
       // Lấy danh sách gia sư mà người dùng đã yêu thích
-      tutors = tutors.filter(tutor => followedTutorIds.includes(tutor._id.toString()));
+      tutors = tutors.filter((tutor) =>
+        followedTutorIds.includes(tutor._id.toString())
+      );
     }
 
     // Thêm thông tin follow status vào mỗi tutor
-    const tutorsWithFollowStatus = tutors.map(tutor => {
+    const tutorsWithFollowStatus = tutors.map((tutor) => {
       const tutorObject = tutor.toObject();
       tutorObject.isFollowed = followedTutorIds.includes(tutor._id.toString());
       return tutorObject;
     });
 
     // Sắp xếp theo các tiêu chí
-    if (sort === 'rating') {
+    if (sort === "rating") {
       tutorsWithFollowStatus.sort((a, b) => b.avgRating - a.avgRating);
-    } else if (sort === 'price') {
+    } else if (sort === "price") {
       tutorsWithFollowStatus.sort((a, b) => a.sessionPrice - b.sessionPrice);
-    } else if (sort === 'newest') {
-      tutorsWithFollowStatus.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    } else if (sort === 'sessions') {
-      tutorsWithFollowStatus.sort((a, b) => b.completedSessions - a.completedSessions);
+    } else if (sort === "newest") {
+      tutorsWithFollowStatus.sort(
+        (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+      );
+    } else if (sort === "sessions") {
+      tutorsWithFollowStatus.sort(
+        (a, b) => b.completedSessions - a.completedSessions
+      );
     } else {
       // Mặc định: sắp xếp theo điểm uy tín và đánh giá (kết hợp)
       tutorsWithFollowStatus.sort((a, b) => {
         // Tính điểm tổng hợp từ trustScore và avgRating
-        const scoreA = (a.trustScore * 0.6) + (a.avgRating * 8); // Trọng số: 60% trustScore, 40% avgRating
-        const scoreB = (b.trustScore * 0.6) + (b.avgRating * 8);
+        const scoreA = a.trustScore * 0.6 + a.avgRating * 8; // Trọng số: 60% trustScore, 40% avgRating
+        const scoreB = b.trustScore * 0.6 + b.avgRating * 8;
         return scoreB - scoreA; // Sắp xếp giảm dần
       });
     }
 
     // Đếm tổng số tutors thỏa mãn điều kiện
-    const total = followed === 'true' && req.user
-      ? tutorsWithFollowStatus.length
-      : await Tutor.countDocuments(query);
+    const total =
+      followed === "true" && req.user
+        ? tutorsWithFollowStatus.length
+        : await Tutor.countDocuments(query);
 
     res.json({
       status: "success",
@@ -169,8 +175,8 @@ const getTutors = async (req, res) => {
         page: parseInt(page),
         limit: parseInt(limit),
         total,
-        pages: Math.ceil(total / limit)
-      }
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -187,7 +193,7 @@ const getTutor = async (req, res) => {
       .populate("userId")
       .populate({
         path: "recentReviews",
-        populate: {path: "userId", select: "name avatar phone"},
+        populate: { path: "userId", select: "name avatar phone" },
       });
     if (!tutor) {
       return res.status(404).json({
@@ -211,7 +217,7 @@ const getTutor = async (req, res) => {
     // Create a response object with tutor data and follow status
     const tutorResponse = {
       ...tutor.toObject(),
-      isFollowed
+      isFollowed,
     };
 
     res.json({
@@ -229,7 +235,7 @@ const getTutor = async (req, res) => {
 // Xem lai sau
 const getAvailableTutors = async (req, res) => {
   try {
-    const {subject, grade, day, time, sort} = req.query; // Lọc theo môn học, lớp, ngày, khung giờ
+    const { subject, grade, day, time, sort } = req.query; // Lọc theo môn học, lớp, ngày, khung giờ
 
     // Xây dựng query
     let query = {};
@@ -239,25 +245,30 @@ const getAvailableTutors = async (req, res) => {
       query.subjects = {};
 
       if (subject) {
-        query.subjects.$elemMatch = {subject: subject};
+        query.subjects.$elemMatch = { subject: subject };
       }
 
       if (grade) {
         if (!query.subjects.$elemMatch) {
           query.subjects.$elemMatch = {};
         }
-        query.subjects.$elemMatch.grades = {$in: [grade]};
+        query.subjects.$elemMatch.grades = { $in: [grade] };
       }
     }
 
     // Lấy danh sách gia sư có thể dạy môn học và lớp này
-    let tutors = await Tutor.find(query).populate("userId", "name email phone avatar");
+    let tutors = await Tutor.find(query).populate(
+      "userId",
+      "name email phone avatar"
+    );
 
     // Lọc gia sư theo lịch trống
     if (day && time) {
-      tutors = tutors.filter(tutor => {
+      tutors = tutors.filter((tutor) => {
         // Kiểm tra xem tutor có ca học này vào ngày này không
-        const availableDay = tutor.availableSchedule.find(schedule => schedule.day === day);
+        const availableDay = tutor.availableSchedule.find(
+          (schedule) => schedule.day === day
+        );
         if (!availableDay) return false;
 
         return availableDay.timeSlots.includes(time);
@@ -265,16 +276,16 @@ const getAvailableTutors = async (req, res) => {
     }
 
     // Sắp xếp theo các tiêu chí
-    if (sort === 'rating') {
+    if (sort === "rating") {
       tutors.sort((a, b) => b.avgRating - a.avgRating);
-    } else if (sort === 'price') {
+    } else if (sort === "price") {
       tutors.sort((a, b) => a.sessionPrice - b.sessionPrice);
     } else {
       // Mặc định: sắp xếp theo điểm uy tín và đánh giá (kết hợp)
       tutors.sort((a, b) => {
         // Tính điểm tổng hợp từ trustScore và avgRating
-        const scoreA = (a.trustScore * 0.6) + (a.avgRating * 8);
-        const scoreB = (b.trustScore * 0.6) + (b.avgRating * 8);
+        const scoreA = a.trustScore * 0.6 + a.avgRating * 8;
+        const scoreB = b.trustScore * 0.6 + b.avgRating * 8;
         return scoreB - scoreA; // Sắp xếp giảm dần
       });
     }
@@ -351,11 +362,11 @@ const getTutorFavoriteCount = async (req, res) => {
     }
 
     // Count favorites for this tutor
-    const count = await Favorite.countDocuments({tutorId});
+    const count = await Favorite.countDocuments({ tutorId });
 
     res.json({
       status: "success",
-      data: {count}
+      data: { count },
     });
   } catch (error) {
     res.status(500).json({

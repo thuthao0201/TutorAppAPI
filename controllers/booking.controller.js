@@ -2,12 +2,14 @@ const Booking = require("../models/booking.model");
 const Tutor = require("../models/tutor.model");
 const Session = require("../models/session.model");
 const User = require("../models/user.model");
+const { createRoom } = require("../utils/stringee");
 
 const createBooking = async (req, res) => {
   try {
     const studentId = req.user._id;
     const tutorId = req.params.tutorId;
-    const {subject, grade, time, day, startDate, endDate, requirements} = req.body;
+    const { subject, grade, time, day, startDate, endDate, requirements } =
+      req.body;
 
     // Kiểm tra thời gian hợp lệ
     const availableSlots = [
@@ -15,10 +17,13 @@ const createBooking = async (req, res) => {
       "9:30-11:30",
       "13:00-15:00",
       "15:30-17:30",
-      "19:00-21:00"
+      "19:00-21:00",
+      "19:00-21:00",
     ];
 
-    if (!availableSlots.includes(time)) {
+    console.log(time);
+
+    if (!availableSlots.find((availableTime) => availableTime === time)) {
       return res.status(400).json({
         status: "fail",
         message: "Thời gian học không hợp lệ. Vui lòng chọn ca học hợp lệ",
@@ -38,7 +43,9 @@ const createBooking = async (req, res) => {
     }
 
     // Kiểm tra giảng viên có dạy môn học này không
-    const subjectExists = tutor.subjects.some(subjectObj => subjectObj.subject === subject);
+    const subjectExists = tutor.subjects.some(
+      (subjectObj) => subjectObj.subject === subject
+    );
     if (!subjectExists) {
       return res.status(400).json({
         status: "fail",
@@ -46,7 +53,9 @@ const createBooking = async (req, res) => {
       });
     }
     // Kiểm tra giảng viên có dạy lớp này không
-    const gradeExists = tutor.subjects.some(subjectObj => subjectObj.grades.includes(grade));
+    const gradeExists = tutor.subjects.some((subjectObj) =>
+      subjectObj.grades.includes(grade)
+    );
     if (!gradeExists) {
       return res.status(400).json({
         status: "fail",
@@ -54,8 +63,10 @@ const createBooking = async (req, res) => {
       });
     }
 
-    const availableScheduleExists = dayArray.some(singleDay => {
-      const daySchedule = tutor.availableSchedule.find(schedule => schedule.day === singleDay);
+    const availableScheduleExists = dayArray.some((singleDay) => {
+      const daySchedule = tutor.availableSchedule.find(
+        (schedule) => schedule.day === singleDay
+      );
       if (!daySchedule) return false;
       return daySchedule.timeSlots.includes(time);
     });
@@ -65,7 +76,6 @@ const createBooking = async (req, res) => {
         message: "Giảng viên không có lịch trống vào thời gian này",
       });
     }
-
 
     // Kiểm tra lịch trống của giảng viên
     let hasConflict = false;
@@ -79,12 +89,17 @@ const createBooking = async (req, res) => {
 
       // Map day strings to day numbers (0 = Sunday, 1 = Monday, etc.)
       const dayMapping = {
-        'sunday': 0, 'monday': 1, 'tuesday': 2, 'wednesday': 3,
-        'thursday': 4, 'friday': 5, 'saturday': 6
+        sunday: 0,
+        monday: 1,
+        tuesday: 2,
+        wednesday: 3,
+        thursday: 4,
+        friday: 5,
+        saturday: 6,
       };
 
       // Convert weekday strings to day numbers
-      const dayNumbers = weekdays.map(day => dayMapping[day.toLowerCase()]);
+      const dayNumbers = weekdays.map((day) => dayMapping[day.toLowerCase()]);
 
       // Clone the start date
       const current = new Date(start);
@@ -118,13 +133,10 @@ const createBooking = async (req, res) => {
 
     // Find all sessions that might conflict
     const potentialConflictSessions = await Session.find({
-      $or: [
-        {studentId: studentId},
-        {tutorId: tutorId}
-      ],
+      $or: [{ studentId: studentId }, { tutorId: tutorId }],
       // tutorId: tutorId,
       time: time,
-      status: "active"
+      status: "active",
     });
 
     // Check each potential conflict session for actual date conflicts
@@ -137,11 +149,12 @@ const createBooking = async (req, res) => {
       );
 
       // Check if any specific dates overlap
-      const conflictingDates = requestedDates.filter(reqDate =>
-        sessionDates.some(sessDate =>
-          reqDate.getFullYear() === sessDate.getFullYear() &&
-          reqDate.getMonth() === sessDate.getMonth() &&
-          reqDate.getDate() === sessDate.getDate()
+      const conflictingDates = requestedDates.filter((reqDate) =>
+        sessionDates.some(
+          (sessDate) =>
+            reqDate.getFullYear() === sessDate.getFullYear() &&
+            reqDate.getMonth() === sessDate.getMonth() &&
+            reqDate.getDate() === sessDate.getDate()
         )
       );
 
@@ -156,10 +169,11 @@ const createBooking = async (req, res) => {
     if (hasConflict) {
       return res.status(400).json({
         status: "fail",
-        message: "Bạn đã có lịch học vào thời gian này hoặc giảng viên đã có lịch học vào thời gian này",
+        message:
+          "Bạn đã có lịch học vào thời gian này hoặc giảng viên đã có lịch học vào thời gian này",
         data: {
-          session: existingSession
-        }
+          session: existingSession,
+        },
       });
     }
 
@@ -190,7 +204,7 @@ const createBooking = async (req, res) => {
       });
     }
     // Cập nhật số dư của giảng viên
-    userTutor.pendingBalance = (tutor.sessionPrice * requestedDates.length);
+    userTutor.pendingBalance = tutor.sessionPrice * requestedDates.length;
     await userTutor.save();
 
     // Không có xung đột lịch, tự động chấp nhận booking
@@ -201,9 +215,13 @@ const createBooking = async (req, res) => {
       time,
       day: dayArray,
       sessionPrice: tutor.sessionPrice,
+      subject,
+      grade,
+      requirements,
       startDate,
       endDate,
-      status: "active"
+      status: "active",
+      roomId: await createRoom(studentId, tutorId),
     });
 
     await newSession.save();
@@ -220,7 +238,7 @@ const createBooking = async (req, res) => {
       endDate,
       requirements,
       status: "accepted", // Tự động chấp nhận booking
-      sessionId: newSession._id
+      sessionId: newSession._id,
     });
 
     await booking.save();
@@ -235,8 +253,8 @@ const createBooking = async (req, res) => {
       message: "Đặt lịch học thành công",
       data: {
         booking,
-        session: newSession
-      }
+        session: newSession,
+      },
     });
   } catch (error) {
     res.status(400).json({
@@ -264,8 +282,15 @@ const getBookings = async (req, res) => {
 const getBookingsOfTutor = async (req, res) => {
   try {
     const userId = req.user._id;
-    const tutor = await Tutor.findOne({userId});
-    const bookings = await Booking.find({tutorId: tutor._id});
+    const tutor = await Tutor.findOne({ userId });
+    const bookings = await Booking.find({ tutorId: tutor._id }).populate({
+      path: "tutorId",
+      populate: {
+        path: "userId",
+        select: "name email avatar",
+      },
+    });
+
     res.json({
       status: "success",
       data: bookings,
@@ -280,8 +305,14 @@ const getBookingsOfTutor = async (req, res) => {
 
 const getBookingsOfUser = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const bookings = await Booking.find({userId});
+    const studentId = req.user._id;
+    const bookings = await Booking.find({ studentId }).populate({
+      path: "tutorId",
+      populate: {
+        path: "userId",
+        select: "name email avatar",
+      },
+    });
     res.json({
       status: "success",
       data: bookings,
@@ -296,7 +327,10 @@ const getBookingsOfUser = async (req, res) => {
 
 const getBooking = async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id);
+    const booking = await Booking.findById(req.params.id).populate({
+      path: "tutorId.userId",
+      select: "name email avatar",
+    });
     if (!booking) {
       return res.status(404).json({
         status: "fail",
@@ -342,7 +376,7 @@ const updateBooking = async (req, res) => {
 
 const cancelBooking = async (req, res) => {
   try {
-    const {reason} = req.body;
+    const { reason } = req.body;
     const userId = req.user._id;
     const userRole = req.user.role;
     const booking = await Booking.findById(req.params.id);
@@ -357,7 +391,7 @@ const cancelBooking = async (req, res) => {
     // Kiểm tra quyền hủy lịch
     let canceledBy;
     if (userRole === "tutor") {
-      const tutor = await Tutor.findOne({userId});
+      const tutor = await Tutor.findOne({ userId });
       if (!tutor || tutor._id.toString() !== booking.tutorId.toString()) {
         return res.status(403).json({
           status: "fail",
@@ -366,7 +400,10 @@ const cancelBooking = async (req, res) => {
       }
       canceledBy = "tutor";
     } else if (userRole === "student" || userRole === "admin") {
-      if (userRole === "student" && booking.studentId.toString() !== userId.toString()) {
+      if (
+        userRole === "student" &&
+        booking.studentId.toString() !== userId.toString()
+      ) {
         return res.status(403).json({
           status: "fail",
           message: "Bạn không có quyền hủy lịch hẹn này",
@@ -387,7 +424,10 @@ const cancelBooking = async (req, res) => {
       // Tính thời gian còn lại trước buổi học (tính theo giờ)
       const bookingStartDate = new Date(booking.startDate);
       const now = new Date();
-      const hoursRemaining = Math.max(0, (bookingStartDate - now) / (1000 * 60 * 60));
+      const hoursRemaining = Math.max(
+        0,
+        (bookingStartDate - now) / (1000 * 60 * 60)
+      );
 
       let penaltyPoints = 0;
 
@@ -423,8 +463,8 @@ const cancelBooking = async (req, res) => {
       message: "Hủy lịch hẹn thành công",
       data: {
         booking,
-        trustScoreDeducted: canceledBy === "tutor" ? penaltyPoints : 0
-      }
+        trustScoreDeducted: canceledBy === "tutor" ? penaltyPoints : 0,
+      },
     });
   } catch (error) {
     res.status(500).json({
