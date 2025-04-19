@@ -306,24 +306,56 @@ const completeSession = async (req, res) => {
     session.completedAt = new Date();
     session.notes = notes;
 
+    // Thưởng điểm uy tín cho tutor khi hoàn thành buổi học
+    const tutor = await Tutor.findById(session.tutorId);
+
+    // Thêm điểm uy tín, nhưng không vượt quá 100
+    const rewardPoints = 1; // Thưởng 1 điểm cho mỗi buổi học hoàn thành
+    tutor.trustScore = Math.min(100, tutor.trustScore + rewardPoints);
+
+    // Tính số buổi học thành công liên tiếp
+    if (!tutor.consecutiveCompletedSessions) {
+      tutor.consecutiveCompletedSessions = 0;
+    }
+    tutor.consecutiveCompletedSessions += 1;
+
+    // Thưởng thêm điểm nếu có chuỗi buổi học thành công liên tiếp
+    if (tutor.consecutiveCompletedSessions % 5 === 0) {
+      // Thưởng thêm 2 điểm sau mỗi 5 buổi học thành công liên tiếp
+      const bonusPoints = 2;
+      tutor.trustScore = Math.min(100, tutor.trustScore + bonusPoints);
+    }
+
     // If rating is provided, update it
     if (rating) {
       session.rating = rating;
 
       // Update tutor's average rating
-      const tutor = await Tutor.findById(session.tutorId);
       const newTotalRating = tutor.avgRating * tutor.totalReviews + rating;
       tutor.totalReviews += 1;
       tutor.avgRating = newTotalRating / tutor.totalReviews;
-      await tutor.save();
     }
 
+    await tutor.save();
     await session.save();
+
+    // Increment completedSessions for the tutor
+    await Tutor.findByIdAndUpdate(session.tutorId, {
+      $inc: {
+        completedSessions: 1,
+        consecutiveCompletedSessions: 1,
+        totalSessions: 1,
+      },
+    });
 
     res.json({
       status: "success",
       message: "Phiên học đã được đánh dấu là hoàn thành",
-      data: session,
+      data: {
+        session,
+        trustScoreAdded:
+          rewardPoints + (tutor.consecutiveCompletedSessions % 5 === 0 ? 2 : 0),
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -336,54 +368,127 @@ const completeSession = async (req, res) => {
 // Cancel a session
 const cancelSession = async (req, res) => {
   try {
-    const sessionId = req.params.id;
+    const { id } = req.params;
     const { reason } = req.body;
+    const userId = req.user._id;
+    const userRole = req.user.role;
 
-    const session = await Session.findById(sessionId);
+    // Tìm session cần hủy
+    const session = await Session.findById(id);
 
     if (!session) {
       return res.status(404).json({
         status: "fail",
-        message: "Không tìm thấy phiên học",
+        message: "Không tìm thấy buổi học này",
       });
     }
 
-    // Check if session is already completed
+    // Kiểm tra nếu buổi học đã hoàn thành
     if (session.status === "completed") {
       return res.status(400).json({
         status: "fail",
-        message: "Không thể hủy phiên học đã hoàn thành",
+        message: "Không thể hủy buổi học đã hoàn thành",
       });
     }
 
-    // Any participant (student, tutor) or admin can cancel
-    if (
-      req.user.role !== "admin" &&
-      session.studentId.toString() !== req.user._id.toString() &&
-      session.tutorId.toString() !== req.user._id.toString()
-    ) {
-      return res.status(403).json({
-        status: "fail",
-        message: "Bạn không có quyền hủy phiên học này",
-      });
+    // Kiểm tra quyền hủy session
+    let canceledBy;
+    if (userRole === "tutor") {
+      const tutor = await Tutor.findOne({ userId });
+      if (!tutor || tutor._id.toString() !== session.tutorId.toString()) {
+        return res.status(403).json({
+          status: "fail",
+          message: "Bạn không có quyền hủy buổi học này",
+        });
+      }
+      canceledBy = "tutor";
+    } else if (userRole === "student") {
+      if (
+        session.studentId &&
+        session.studentId.toString() !== userId.toString()
+      ) {
+        return res.status(403).json({
+          status: "fail",
+          message: "Bạn không có quyền hủy buổi học này",
+        });
+      }
+      canceledBy = "student";
+    } else if (userRole === "admin") {
+      canceledBy = "admin";
     }
 
+    // Cập nhật trạng thái session
     session.status = "canceled";
+    session.canceledBy = canceledBy;
+    session.cancelReason = reason || "Không có lý do được cung cấp";
     session.canceledAt = new Date();
-    session.cancelReason = reason;
-    session.canceledBy = req.user._id;
+
+    // Nếu giảng viên hủy session, tính điểm phạt
+    let penaltyPoints = 0;
+    if (canceledBy === "tutor") {
+      const tutor = await Tutor.findById(session.tutorId);
+
+      // Tính thời gian còn lại trước buổi học (tính theo giờ)
+      const sessionStartDate = new Date(session.startDate);
+      const now = new Date();
+      const hoursRemaining = Math.max(
+        0,
+        (sessionStartDate - now) / (1000 * 60 * 60)
+      );
+
+      // Tính điểm phạt dựa trên thời gian còn lại
+      if (hoursRemaining < 2) {
+        // Hủy gấp (dưới 2 giờ trước buổi học)
+        penaltyPoints = 10;
+      } else if (hoursRemaining < 24) {
+        // Hủy trong ngày (dưới 24 giờ)
+        penaltyPoints = 5;
+      } else if (hoursRemaining < 72) {
+        // Hủy trước 3 ngày
+        penaltyPoints = 3;
+      } else {
+        // Hủy sớm (trước 3 ngày trở lên)
+        penaltyPoints = 1;
+      }
+
+      // Trừ điểm uy tín của giảng viên
+      if (tutor) {
+        tutor.trustScore = Math.max(0, tutor.trustScore - penaltyPoints);
+        tutor.consecutiveCompletedSessions = 0; // Reset số buổi học thành công liên tiếp
+        await tutor.save();
+      }
+    }
 
     await session.save();
 
+    // Nếu session liên kết với booking, cập nhật trạng thái booking
+    if (session.bookingId) {
+      const booking = await Booking.findById(session.bookingId);
+      if (booking) {
+        booking.status = "canceled";
+        booking.canceledBy = canceledBy;
+        booking.cancelReason = reason || "Không có lý do được cung cấp";
+        await booking.save();
+      }
+    }
+
+    // Reset consecutive completed sessions counter for the tutor
+    await Tutor.findByIdAndUpdate(session.tutorId, {
+      consecutiveCompletedSessions: 0,
+    });
+
     res.json({
       status: "success",
-      message: "Phiên học đã bị hủy",
-      data: session,
+      message: "Hủy buổi học thành công",
+      data: {
+        session,
+        trustScoreDeducted: canceledBy === "tutor" ? penaltyPoints : 0,
+      },
     });
   } catch (error) {
     res.status(500).json({
       status: "error",
-      message: "Có lỗi xảy ra khi hủy phiên học: " + error.message,
+      message: "Có lỗi xảy ra khi hủy buổi học: " + error.message,
     });
   }
 };

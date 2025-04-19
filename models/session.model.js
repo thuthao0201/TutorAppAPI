@@ -2,14 +2,6 @@ const mongoose = require("mongoose");
 
 const sessionSchema = new mongoose.Schema(
   {
-    roomId: {
-      type: String,
-      // required: true,
-    },
-    duration: {
-      type: Number,
-      default: 120,
-    },
     tutorId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Tutor",
@@ -18,7 +10,13 @@ const sessionSchema = new mongoose.Schema(
     studentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+    },
+    roomId: {
+      type: String,
+    },
+    duration: {
+      type: Number,
+      default: 120,
     },
     startDate: {
       type: Date,
@@ -56,13 +54,27 @@ const sessionSchema = new mongoose.Schema(
     ],
     subject: {
       type: String,
-      required: true,
     },
     grade: {
       type: String,
-      required: true,
     },
     requirements: {
+      type: String,
+    },
+    sessionPrice: {
+      type: Number,
+    },
+    status: {
+      type: String,
+      default: "active",
+      enum: ["active", "completed", "canceled"],
+    },
+    canceledBy: {
+      type: String,
+      enum: ["tutor", "student", "admin", null],
+      default: null,
+    },
+    cancelReason: {
       type: String,
     },
   },

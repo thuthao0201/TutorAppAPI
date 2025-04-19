@@ -3,10 +3,33 @@ const Tutor = require("../models/tutor.model");
 
 const reviewTutor = async (req, res) => {
   try {
-    const review = new Review(req.body);
-    await review.save();
     const tutor = await Tutor.findById(req.params.tutorId);
+
+    if (!tutor) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Không tìm thấy gia sư",
+      });
+    }
+
+    const review = await Review.create({
+      ...req.body,
+      tutorId: req.params.tutorId,
+      userId: req.user._id,
+    });
+    if (!review) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Không thể tạo đánh giá",
+      });
+    }
     tutor.recentReviews.push(review._id);
+    if (tutor.recentReviews.length > 5) {
+      tutor.recentReviews.shift();
+    }
+    tutor.totalReviews += 1;
+    tutor.totalStar += review.rating;
+    tutor.avgRating = tutor.totalStar / tutor.totalReviews;
     await tutor.save();
     res.status(201).json({
       status: "success",
@@ -58,7 +81,7 @@ const getReview = async (req, res) => {
 
 const getReviewsByTutor = async (req, res) => {
   try {
-    const reviews = await Review.find({ tutorId: req.params.tutorId });
+    const reviews = await Review.find({tutorId: req.params.tutorId});
     res.json({
       status: "success",
       data: reviews,

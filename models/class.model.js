@@ -33,10 +33,14 @@ const classSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    expectedPrice: {
+      type: Number,
+      default: 0, // Giá 0 có nghĩa là không giới hạn giá
+    },
     status: {
       type: String,
       default: "pending",
-      enum: ["pending", "matched", "waiting", "canceled"],
+      enum: ["pending", "matched", "canceled"],
     },
     sessionId: {
       type: mongoose.Schema.Types.ObjectId,

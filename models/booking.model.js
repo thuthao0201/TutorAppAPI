@@ -57,7 +57,15 @@ const bookingSchema = new mongoose.Schema(
     status: {
       type: String,
       default: "pending",
-      enum: ["pending", "accepted", "rejected", "canceled"],
+      enum: ["pending", "accepted", "canceled"],
+    },
+    canceledBy: {
+      type: String,
+      enum: ["tutor", "student", "admin", null],
+      default: null,
+    },
+    cancelReason: {
+      type: String,
     },
     sessionId: {
       type: mongoose.Schema.Types.ObjectId,
