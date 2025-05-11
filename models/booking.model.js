@@ -18,18 +18,18 @@ const bookingSchema = new mongoose.Schema(
     },
     grade: {
       type: String,
-      required: true,
+      enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
     },
-    time: {
+    timeSlot: {
       type: String,
       required: true,
       enum: ["7:00-9:00", "9:30-11:30", "13:00-15:00", "15:30-17:30", "19:00-21:00"]
     },
-    day: [{
+    day: {
       type: String,
       required: true,
       enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-    }],
+    },
     startDate: {
       type: Date,
       required: true,
@@ -40,20 +40,19 @@ const bookingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      default: "pending",
-      enum: ["pending", "accepted", "canceled"],
+      default: "submitted",
+      enum: ["submitted", "canceled"],
     },
     canceledBy: {
       type: String,
-      enum: ["tutor", "student", "admin", null],
-      default: null,
+      enum: ["tutor", "student", "admin"],
     },
     cancelReason: {
       type: String,
     },
-    sessionId: {
+    classId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Session",
+      ref: "Class",
     },
     requirements: {
       type: String,

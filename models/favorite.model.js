@@ -19,9 +19,6 @@ const favoriteSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Compound index to ensure a user can only favorite a tutor once
-favoriteSchema.index({studentId: 1, tutorId: 1}, {unique: true});
-
 const Favorite = mongoose.model('Favorite', favoriteSchema);
 
 module.exports = Favorite;

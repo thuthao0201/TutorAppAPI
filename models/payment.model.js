@@ -8,7 +8,7 @@ const paymentSchema = new mongoose.Schema({
     },
     type: {
         type: String,
-        enum: ['deposit', 'withdrawal', 'session_payment', 'session_refund', 'tutor_earning'],
+        enum: ['deposit', 'withdrawal', 'class_payment', 'class_refund', 'tutor_earning'],
         required: true,
     },
     amount: {

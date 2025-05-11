@@ -11,15 +11,11 @@ const tutorSchema = new mongoose.Schema({
     type: String,
   },
   specialized: {
-    //Chuyen nganh: vidu: nganh giao duc, nganh y
+    //Chuyen nganh: vi du: nganh giao duc, nganh y
     type: String,
   },
   degree: {
-    //Hoc vi: vidu: thac si, cu nhan
-    type: String,
-  },
-  field: {
-    //Khu vuc: vidu: TP.HCM, Ha Noi
+    //Hoc vi: vi du: thac si, cu nhan
     type: String,
   },
   hasCertificate: {
@@ -29,26 +25,13 @@ const tutorSchema = new mongoose.Schema({
   },
   subjects: [
     {
-      subject: {
+      name: {
         type: String,
       },
       grades: {
         type: [String],
-        enum: [
-          "1",
-          "2",
-          "3",
-          "4",
-          "5",
-          "6",
-          "7",
-          "8",
-          "9",
-          "10",
-          "11",
-          "12",
-        ],
-      },
+        enum: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"],
+      }
     },
   ],
   availableSchedule: [
@@ -67,7 +50,7 @@ const tutorSchema = new mongoose.Schema({
     //Kinh nghiem và thành tích
     type: String,
   },
-  sessionPrice: {
+  classPrice: {
     type: Number,
     default: 50000,
   },
@@ -86,11 +69,6 @@ const tutorSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  totalSessions: {
-    //Tong so buoi hoc
-    type: Number,
-    default: 0,
-  },
   recentReviews: {
     //Danh sach danh gia gan day
     type: [mongoose.Schema.Types.ObjectId],
@@ -102,11 +80,12 @@ const tutorSchema = new mongoose.Schema({
     min: 0,
     max: 100,
   },
-  completedSessions: {
+  completedClasses: {
+    // Tong so buoi hoc da hoan thanh
     type: Number,
     default: 0,
   },
-  consecutiveCompletedSessions: {
+  consecutiveCompletedClasses: {
     type: Number,
     default: 0,
     // Số buổi học thành công liên tiếp

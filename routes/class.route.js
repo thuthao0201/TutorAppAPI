@@ -5,25 +5,37 @@ const {
   createClass,
   getClasses,
   getClass,
-  selectAlternativeTime,
-  cancelClass
+  updateClass,
+  completeClass,
+  cancelClass,
+  rescheduleClass,
+  getClassHistory
 } = require("../controllers/class.controller");
 
-const { isOwnerOrAdmin } = require("../middlewares/role.middleware");
+const {isAdmin, isOwnerOrAdmin, isAdminOrTutor} = require("../middlewares/role.middleware");
 
-// Tạo lớp mới
+// Tạo lớp học mới
 router.post("/", createClass);
 
 // Lấy danh sách lớp học
 router.get("/", getClasses);
 
-// Lấy thông tin chi tiết lớp học
-router.get("/:id", isOwnerOrAdmin, getClass);
+// Lấy lịch sử lớp học của một lớp/booking
+router.get("/history", getClassHistory);
 
-// Chọn thời gian thay thế
-router.patch("/:id/select-time", isOwnerOrAdmin, selectAlternativeTime);
+// Lấy chi tiết lớp học
+router.get("/:id", getClass);
+
+// Cập nhật thông tin lớp học
+router.patch("/:id", isOwnerOrAdmin, updateClass);
+
+// Đánh dấu lớp học đã hoàn thành
+router.patch("/:id/complete", isAdminOrTutor, completeClass);
+
+// Lên lịch lại lớp học
+router.patch("/:id/reschedule", isOwnerOrAdmin, rescheduleClass);
 
 // Hủy lớp học
-router.delete("/:id", isOwnerOrAdmin, cancelClass);
+router.patch("/:id/cancel", isOwnerOrAdmin, cancelClass);
 
 module.exports = router;

@@ -7,6 +7,7 @@ const {
   getTutor,
   updateTutor,
   deleteTutor,
+  getOwnTutorProfile
 } = require("../controllers/tutor.controller");
 
 const {isAdmin, isAdminOrTutor, isOwnerOrAdmin} = require("../middlewares/role.middleware");
@@ -25,6 +26,7 @@ router.post("/:tutorId/reviews", reviewTutor);
 router.post("/:tutorId/bookings", createBooking);
 router.post("/", isAdmin, upload.single("avatar"), createTutor);
 router.post("/:tutorId/favorite", addFavorite);
+router.get("/me", isAdminOrTutor, getOwnTutorProfile);
 router.get("/:tutorId", getTutor);
 router.get("/:tutorId/reviews", getReviewsByTutor);
 router.get("/", getTutors);
