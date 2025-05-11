@@ -12,8 +12,8 @@ const paymentSchema = new mongoose.Schema(
       enum: [
         "deposit",
         "withdrawal",
-        "session_payment",
-        "session_refund",
+        "class_payment",
+        "class_refund",
         "tutor_earning",
       ],
       required: true,

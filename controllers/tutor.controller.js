@@ -101,6 +101,12 @@ const getTutors = async (req, res) => {
         { name: { $regex: search, $options: "i" }, role: "tutor" },
         { _id: 1 }
       ).lean();
+=======
+        {name: {$regex: search, $options: 'i'}, role: 'tutor'},
+        {_id: 1}
+      );
+
+>>>>>>> 9c2ca9ecd37f35cfb961a09e965ae2ddae78c654
       // Tìm theo tên hoặc môn học
       query.$or = [
         { userId: { $in: userIds.map((user) => user._id) } },

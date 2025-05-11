@@ -2,30 +2,25 @@ const mongoose = require("mongoose");
 
 const classSchema = new mongoose.Schema(
   {
-    subject: {
-      type: String,
-      required: true,
-    },
-    grade: {
-      //
-      type: String,
+    tutorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tutor",
       required: true,
     },
     studentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
     },
-    time: {
+    roomId: {
       type: String,
-      required: true,
-      enum: ["7:00-9:00", "9:30-11:30", "13:00-15:00", "15:30-17:30", "19:00-21:00"]
     },
-    day: [{
+    joinUrl: {
       type: String,
-      required: true,
-      enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-    }],
+    },
+    duration: {
+      type: Number,
+      default: 120,
+    },
     startDate: {
       type: Date,
       required: true,
@@ -34,21 +29,53 @@ const classSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
-    expectedPrice: {
+    timeSlot: {
+      type: String,
+      required: true,
+      enum: [
+        "7:00-9:00",
+        "9:30-11:30",
+        "13:00-15:00",
+        "15:30-17:30",
+        "19:00-21:00",
+      ],
+    },
+    day: {
+      type: String,
+      required: true,
+      enum: [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+      ],
+    },
+    subject: {
+      type: String,
+    },
+    grade: {
+      type: String,
+    },
+    requirements: {
+      type: String,
+    },
+    classPrice: {
       type: Number,
-      default: 0, // Giá 0 có nghĩa là không giới hạn giá
     },
     status: {
       type: String,
-      default: "pending",
-      enum: ["pending", "matched", "canceled"],
+      default: "active",
+      enum: ["active", "completed", "canceled"],
     },
-    sessionId: {
-      
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Session",
+    canceledBy: {
+      type: String,
+      enum: ["tutor", "student", "admin", null],
+      default: null,
     },
-    requirements: {
+    cancelReason: {
       type: String,
     },
   },
