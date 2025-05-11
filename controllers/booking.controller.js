@@ -15,7 +15,8 @@ const createBooking = async (req, res) => {
       "9:30-11:30",
       "13:00-15:00",
       "15:30-17:30",
-      "19:00-21:00"
+      "19:00-21:00",
+      "19:00-21:00",
     ];
 
     if (!availableSlots.includes(timeSlot)) {
@@ -113,7 +114,8 @@ const createBooking = async (req, res) => {
     if (hasConflict) {
       return res.status(400).json({
         status: "fail",
-        message: "Bạn đã có lịch học vào thời gian này hoặc giảng viên đã có lịch học vào thời gian này",
+        message:
+          "Bạn đã có lịch học vào thời gian này hoặc giảng viên đã có lịch học vào thời gian này",
         data: {
           class: existingClass
         }
@@ -334,7 +336,10 @@ const getBookingsOfUser = async (req, res) => {
 
 const getBooking = async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id);
+    const booking = await Booking.findById(req.params.id).populate({
+      path: "tutorId.userId",
+      select: "name email avatar",
+    });
     if (!booking) {
       return res.status(404).json({
         status: "fail",
@@ -404,7 +409,10 @@ const cancelBooking = async (req, res) => {
       }
       canceledBy = "tutor";
     } else if (userRole === "student" || userRole === "admin") {
-      if (userRole === "student" && booking.studentId.toString() !== userId.toString()) {
+      if (
+        userRole === "student" &&
+        booking.studentId.toString() !== userId.toString()
+      ) {
         return res.status(403).json({
           status: "fail",
           message: "Bạn không có quyền hủy lịch hẹn này",
@@ -426,7 +434,10 @@ const cancelBooking = async (req, res) => {
       // Tính thời gian còn lại trước buổi học (tính theo giờ)
       const bookingStartDate = new Date(booking.startDate);
       const now = new Date();
-      const hoursRemaining = Math.max(0, (bookingStartDate - now) / (1000 * 60 * 60));
+      const hoursRemaining = Math.max(
+        0,
+        (bookingStartDate - now) / (1000 * 60 * 60)
+      );
 
       // Tính điểm phạt dựa trên thời gian còn lại
       if (hoursRemaining < 2) {
@@ -464,8 +475,8 @@ const cancelBooking = async (req, res) => {
       message: "Hủy lịch hẹn thành công",
       data: {
         booking,
-        trustScoreDeducted: canceledBy === "tutor" ? penaltyPoints : 0
-      }
+        trustScoreDeducted: canceledBy === "tutor" ? penaltyPoints : 0,
+      },
     });
   } catch (error) {
     res.status(500).json({
