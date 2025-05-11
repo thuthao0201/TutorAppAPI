@@ -7,6 +7,7 @@ const classSchema = new mongoose.Schema(
       required: true,
     },
     grade: {
+      //
       type: String,
       required: true,
     },
@@ -43,6 +44,7 @@ const classSchema = new mongoose.Schema(
       enum: ["pending", "matched", "canceled"],
     },
     sessionId: {
+      
       type: mongoose.Schema.Types.ObjectId,
       ref: "Session",
     },

@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
       default: "/uploads/default-avatar.png",
     },
     refreshToken: {
+      // làm
       type: String,
     },
     phone: {

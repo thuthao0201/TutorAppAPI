@@ -100,23 +100,27 @@ const getTutors = async (req, res) => {
       const userIds = await User.find(
         { name: { $regex: search, $options: "i" }, role: "tutor" },
         { _id: 1 }
-      );
-
+      ).lean();
       // Tìm theo tên hoặc môn học
       query.$or = [
         { userId: { $in: userIds.map((user) => user._id) } },
         { "subjects.subject": { $regex: search, $options: "i" } },
       ];
     }
+    console.log("Query:", query); // Debugging line to check the query
 
     // Lấy danh sách tutor và populate thông tin user
     let tutorsQuery = Tutor.find(query)
-      .populate("userId", "name email phone avatar")
+      .populate({
+        path: "userId",
+        math: { name: { $regex: search, $options: "i" } },
+        select: "name email phone avatar",
+      })
       .limit(parseInt(limit))
       .skip(skip);
 
     // Lọc theo gia sư được theo dõi (yêu thích) bởi người dùng hiện tại
-    let tutors = await tutorsQuery;
+    let tutors = (await tutorsQuery).filter((tutor) => tutor.userId !== null);
 
     // Lấy danh sách các tutorId mà user đã follow (nếu user đã đăng nhập)
     let followedTutorIds = [];
@@ -189,6 +193,7 @@ const getTutors = async (req, res) => {
 
 const getTutor = async (req, res) => {
   try {
+    //
     const tutor = await Tutor.findById(req.params.tutorId)
       .populate("userId")
       .populate({
