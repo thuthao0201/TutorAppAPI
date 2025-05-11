@@ -1,15 +1,13 @@
 const Booking = require("../models/booking.model");
 const Tutor = require("../models/tutor.model");
-const Session = require("../models/session.model");
+const Class = require("../models/class.model");
 const User = require("../models/user.model");
-const { createRoom } = require("../utils/stringee");
 
 const createBooking = async (req, res) => {
   try {
     const studentId = req.user._id;
     const tutorId = req.params.tutorId;
-    const { subject, grade, time, day, startDate, endDate, requirements } =
-      req.body;
+    const {subject, grade, timeSlot, day, startDate, endDate, requirements} = req.body;
 
     // Kiểm tra thời gian hợp lệ
     const availableSlots = [
@@ -21,17 +19,21 @@ const createBooking = async (req, res) => {
       "19:00-21:00",
     ];
 
-    console.log(time);
-
-    if (!availableSlots.find((availableTime) => availableTime === time)) {
+    if (!availableSlots.includes(timeSlot)) {
       return res.status(400).json({
         status: "fail",
         message: "Thời gian học không hợp lệ. Vui lòng chọn ca học hợp lệ",
       });
     }
 
-    // Đảm bảo day luôn là một mảng
-    const dayArray = Array.isArray(day) ? day : [day];
+    // Kiểm tra ngày trong tuần hợp lệ
+    const validDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    if (!validDays.includes(day)) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Ngày học không hợp lệ. Vui lòng chọn ngày hợp lệ",
+      });
+    }
 
     // Kiểm tra giảng viên tồn tại
     const tutor = await Tutor.findById(tutorId);
@@ -43,19 +45,16 @@ const createBooking = async (req, res) => {
     }
 
     // Kiểm tra giảng viên có dạy môn học này không
-    const subjectExists = tutor.subjects.some(
-      (subjectObj) => subjectObj.subject === subject
-    );
+    const subjectExists = tutor.subjects.some(subjectObj => subjectObj.name === subject);
     if (!subjectExists) {
       return res.status(400).json({
         status: "fail",
         message: "Giảng viên không dạy môn học này",
       });
     }
+
     // Kiểm tra giảng viên có dạy lớp này không
-    const gradeExists = tutor.subjects.some((subjectObj) =>
-      subjectObj.grades.includes(grade)
-    );
+    const gradeExists = tutor.subjects.some(subjectObj => subjectObj.grades.includes(grade) && subjectObj.name === subject);
     if (!gradeExists) {
       return res.status(400).json({
         status: "fail",
@@ -63,105 +62,51 @@ const createBooking = async (req, res) => {
       });
     }
 
-    const availableScheduleExists = dayArray.some((singleDay) => {
-      const daySchedule = tutor.availableSchedule.find(
-        (schedule) => schedule.day === singleDay
-      );
-      if (!daySchedule) return false;
-      return daySchedule.timeSlots.includes(time);
-    });
-    if (!availableScheduleExists) {
+    // Kiểm tra ca học có phù hợp với lịch của giảng viên không
+    const daySchedule = tutor.availableSchedule.find(schedule => schedule.day === day);
+    if (!daySchedule || !daySchedule.timeSlots.includes(timeSlot)) {
       return res.status(400).json({
         status: "fail",
-        message: "Giảng viên không có lịch trống vào thời gian này",
+        message: "Giảng viên không có lịch vào thời gian này",
       });
     }
 
-    // Kiểm tra lịch trống của giảng viên
+    // Chuẩn hóa ngày bắt đầu và kết thúc
+    const normalizedDates = normalizeStartAndEndDates(new Date(startDate), new Date(endDate), day);
+    if (!normalizedDates) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Không thể chuẩn hóa ngày bắt đầu và kết thúc",
+      });
+    }
+
+    const normalizedStartDate = normalizedDates.startDate;
+    const normalizedEndDate = normalizedDates.endDate;
+
+    // Kiểm tra xem có lớp học nào trùng lịch không
     let hasConflict = false;
-    let existingSession = null;
+    let existingClass = null;
 
-    // Helper function to get all occurrences of specific weekdays within a date range
-    const getWeekdayDatesInRange = (startDate, endDate, weekdays) => {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const dates = [];
-
-      // Map day strings to day numbers (0 = Sunday, 1 = Monday, etc.)
-      const dayMapping = {
-        sunday: 0,
-        monday: 1,
-        tuesday: 2,
-        wednesday: 3,
-        thursday: 4,
-        friday: 5,
-        saturday: 6,
-      };
-
-      // Convert weekday strings to day numbers
-      const dayNumbers = weekdays.map((day) => dayMapping[day.toLowerCase()]);
-
-      // Clone the start date
-      const current = new Date(start);
-
-      // Iterate through each date in the range
-      while (current <= end) {
-        const dayOfWeek = current.getDay();
-
-        // If current day is in our weekdays list, add it
-        if (dayNumbers.includes(dayOfWeek)) {
-          dates.push(new Date(current));
-        }
-
-        // Move to next day
-        current.setDate(current.getDate() + 1);
-      }
-
-      return dates;
-    };
-
-    // Get actual calendar dates for the requested booking
-    const requestedDates = getWeekdayDatesInRange(startDate, endDate, dayArray);
-
-    // If no specific dates match the criteria, there's nothing to book
-    if (requestedDates.length === 0) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Không có ngày học nào phù hợp trong khoảng thời gian đã chọn",
-      });
-    }
-
-    // Find all sessions that might conflict
-    const potentialConflictSessions = await Session.find({
-      $or: [{ studentId: studentId }, { tutorId: tutorId }],
-      // tutorId: tutorId,
-      time: time,
-      status: "active",
+    // Kiểm tra lịch trùng dựa trên timeSlot và day
+    const potentialConflicts = await Class.find({
+      $or: [
+        {studentId: studentId},
+        {tutorId: tutorId}
+      ],
+      timeSlot: timeSlot,
+      day: day,
+      status: "active"
     });
 
-    // Check each potential conflict session for actual date conflicts
-    for (const session of potentialConflictSessions) {
-      // Get actual calendar dates for the existing session
-      const sessionDates = getWeekdayDatesInRange(
-        session.startDate,
-        session.endDate,
-        session.day
-      );
-
-      // Check if any specific dates overlap
-      const conflictingDates = requestedDates.filter((reqDate) =>
-        sessionDates.some(
-          (sessDate) =>
-            reqDate.getFullYear() === sessDate.getFullYear() &&
-            reqDate.getMonth() === sessDate.getMonth() &&
-            reqDate.getDate() === sessDate.getDate()
-        )
-      );
-
-      if (conflictingDates.length > 0) {
-        hasConflict = true;
-        existingSession = session;
-        break;
+    // Kiểm tra xem có trùng ngày cụ thể không
+    if (potentialConflicts.length > 0) {
+      for (const cls of potentialConflicts) {
+        // Kiểm tra xem có trùng thời gian không
+        if (datesOverlap(normalizedStartDate, normalizedEndDate, cls.startDate, cls.endDate)) {
+          hasConflict = true;
+          existingClass = cls;
+          break;
+        }
       }
     }
 
@@ -172,11 +117,12 @@ const createBooking = async (req, res) => {
         message:
           "Bạn đã có lịch học vào thời gian này hoặc giảng viên đã có lịch học vào thời gian này",
         data: {
-          session: existingSession,
-        },
+          class: existingClass
+        }
       });
     }
 
+    // Kiểm tra số dư của người dùng
     const user = await User.findById(studentId);
     if (!user) {
       return res.status(404).json({
@@ -185,17 +131,30 @@ const createBooking = async (req, res) => {
       });
     }
 
-    if (user.balance < tutor.sessionPrice * requestedDates.length) {
+    // Tính số buổi học
+    const numberOfSessions = countSessionsBetweenDates(normalizedStartDate, normalizedEndDate, day);
+
+    if (numberOfSessions === 0) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Không có buổi học nào trong khoảng thời gian đã chọn",
+      });
+    }
+
+    const totalPrice = tutor.classPrice * numberOfSessions;
+
+    if (user.balance < totalPrice) {
       return res.status(400).json({
         status: "fail",
         message: "Số dư không đủ để đặt lịch học",
       });
     }
-    // Trừ tiền trong tài khoản của người dùng
-    user.balance -= tutor.sessionPrice * requestedDates.length;
-    await user.save();
-    await tutor.save();
 
+    // Trừ tiền trong tài khoản của người dùng
+    user.balance -= totalPrice;
+    await user.save();
+
+    // Cập nhật số dư chờ của giảng viên
     const userTutor = await User.findById(tutor.userId);
     if (!userTutor) {
       return res.status(404).json({
@@ -203,28 +162,26 @@ const createBooking = async (req, res) => {
         message: "Không tìm thấy người dùng giảng viên",
       });
     }
-    // Cập nhật số dư của giảng viên
-    userTutor.pendingBalance = tutor.sessionPrice * requestedDates.length;
+
+    userTutor.pendingBalance += totalPrice;
     await userTutor.save();
 
-    // Không có xung đột lịch, tự động chấp nhận booking
-    // Tạo session mới
-    const newSession = new Session({
+    // Tạo lớp học mới
+    const newClass = new Class({
       studentId,
       tutorId,
-      time,
-      day: dayArray,
-      sessionPrice: tutor.sessionPrice,
+      timeSlot,
+      day,
+      startDate: normalizedStartDate,
+      endDate: normalizedEndDate,
       subject,
       grade,
       requirements,
-      startDate,
-      endDate,
-      status: "active",
-      roomId: await createRoom(studentId, tutorId),
+      classPrice: totalPrice,
+      status: "active"
     });
 
-    await newSession.save();
+    await newClass.save();
 
     // Tạo booking với trạng thái đã chấp nhận
     const booking = new Booking({
@@ -232,20 +189,16 @@ const createBooking = async (req, res) => {
       studentId,
       subject,
       grade,
-      time,
-      day: dayArray,
-      startDate,
-      endDate,
+      timeSlot,
+      day,
+      startDate: normalizedStartDate,
+      endDate: normalizedEndDate,
       requirements,
-      status: "accepted", // Tự động chấp nhận booking
-      sessionId: newSession._id,
+      status: "submitted",
+      classId: newClass._id
     });
 
     await booking.save();
-
-    // Cập nhật session với booking ID
-    newSession.bookingId = booking._id;
-    await newSession.save();
 
     // Thông báo thành công
     res.status(201).json({
@@ -253,8 +206,8 @@ const createBooking = async (req, res) => {
       message: "Đặt lịch học thành công",
       data: {
         booking,
-        session: newSession,
-      },
+        class: newClass
+      }
     });
   } catch (error) {
     res.status(400).json({
@@ -263,6 +216,75 @@ const createBooking = async (req, res) => {
     });
   }
 };
+
+// Hàm chuẩn hóa ngày bắt đầu và kết thúc dựa theo ngày trong tuần
+function normalizeStartAndEndDates (startDate, endDate, dayOfWeek) {
+  try {
+    const dayMap = {
+      "Monday": 1,
+      "Tuesday": 2,
+      "Wednesday": 3,
+      "Thursday": 4,
+      "Friday": 5,
+      "Saturday": 6,
+      "Sunday": 0
+    };
+
+    const dayNumber = dayMap[dayOfWeek];
+    if (dayNumber === undefined) return null;
+
+    // Tìm ngày đầu tiên sau hoặc bằng ngày bắt đầu
+    const normalizedStartDate = new Date(startDate);
+    while (normalizedStartDate.getDay() !== dayNumber) {
+      normalizedStartDate.setDate(normalizedStartDate.getDate() + 1);
+    }
+
+    // Tìm ngày cuối cùng trước hoặc bằng ngày kết thúc
+    const normalizedEndDate = new Date(endDate);
+    while (normalizedEndDate.getDay() !== dayNumber) {
+      normalizedEndDate.setDate(normalizedEndDate.getDate() - 1);
+    }
+
+    // Nếu ngày bắt đầu sau ngày kết thúc sau khi chuẩn hóa, trả về null
+    if (normalizedStartDate > normalizedEndDate) return null;
+
+    return {startDate: normalizedStartDate, endDate: normalizedEndDate};
+  } catch (error) {
+    console.error("Error normalizing dates:", error);
+    return null;
+  }
+}
+
+// Kiểm tra xem hai khoảng thời gian có trùng nhau không
+function datesOverlap (start1, end1, start2, end2) {
+  return start1 <= end2 && start2 <= end1;
+}
+
+// Đếm số buổi học giữa hai ngày với ngày cụ thể trong tuần
+function countSessionsBetweenDates (startDate, endDate, dayOfWeek) {
+  const dayMap = {
+    "Monday": 1,
+    "Tuesday": 2,
+    "Wednesday": 3,
+    "Thursday": 4,
+    "Friday": 5,
+    "Saturday": 6,
+    "Sunday": 0
+  };
+
+  const dayNumber = dayMap[dayOfWeek];
+  let count = 0;
+  let currentDate = new Date(startDate);
+
+  while (currentDate <= endDate) {
+    if (currentDate.getDay() === dayNumber) {
+      count++;
+    }
+    currentDate.setDate(currentDate.getDate() + 7);
+  }
+
+  return count;
+}
 
 const getBookings = async (req, res) => {
   try {
@@ -282,15 +304,8 @@ const getBookings = async (req, res) => {
 const getBookingsOfTutor = async (req, res) => {
   try {
     const userId = req.user._id;
-    const tutor = await Tutor.findOne({ userId });
-    const bookings = await Booking.find({ tutorId: tutor._id }).populate({
-      path: "tutorId",
-      populate: {
-        path: "userId",
-        select: "name email avatar",
-      },
-    });
-
+    const tutor = await Tutor.findOne({userId});
+    const bookings = await Booking.find({tutorId: tutor._id});
     res.json({
       status: "success",
       data: bookings,
@@ -305,14 +320,8 @@ const getBookingsOfTutor = async (req, res) => {
 
 const getBookingsOfUser = async (req, res) => {
   try {
-    const studentId = req.user._id;
-    const bookings = await Booking.find({ studentId }).populate({
-      path: "tutorId",
-      populate: {
-        path: "userId",
-        select: "name email avatar",
-      },
-    });
+    const userId = req.user._id;
+    const bookings = await Booking.find({userId});
     res.json({
       status: "success",
       data: bookings,
@@ -376,7 +385,7 @@ const updateBooking = async (req, res) => {
 
 const cancelBooking = async (req, res) => {
   try {
-    const { reason } = req.body;
+    const {reason} = req.body;
     const userId = req.user._id;
     const userRole = req.user.role;
     const booking = await Booking.findById(req.params.id);
@@ -391,7 +400,7 @@ const cancelBooking = async (req, res) => {
     // Kiểm tra quyền hủy lịch
     let canceledBy;
     if (userRole === "tutor") {
-      const tutor = await Tutor.findOne({ userId });
+      const tutor = await Tutor.findOne({userId});
       if (!tutor || tutor._id.toString() !== booking.tutorId.toString()) {
         return res.status(403).json({
           status: "fail",
@@ -418,6 +427,7 @@ const cancelBooking = async (req, res) => {
     booking.cancelReason = reason || "Không có lý do được cung cấp";
 
     // Nếu tutor hủy lịch, giảm điểm uy tín
+    let penaltyPoints = 0;
     if (canceledBy === "tutor") {
       const tutor = await Tutor.findById(booking.tutorId);
 
@@ -428,8 +438,6 @@ const cancelBooking = async (req, res) => {
         0,
         (bookingStartDate - now) / (1000 * 60 * 60)
       );
-
-      let penaltyPoints = 0;
 
       // Tính điểm phạt dựa trên thời gian còn lại
       if (hoursRemaining < 2) {
@@ -453,9 +461,13 @@ const cancelBooking = async (req, res) => {
 
     await booking.save();
 
-    // Xóa session nếu có
-    if (booking.sessionId) {
-      await Session.findByIdAndDelete(booking.sessionId);
+    // Xóa class nếu có
+    if (booking.classId) {
+      await Class.findByIdAndUpdate(booking.classId, {
+        status: "canceled",
+        canceledBy: canceledBy,
+        cancelReason: reason || "Không có lý do được cung cấp"
+      });
     }
 
     res.json({

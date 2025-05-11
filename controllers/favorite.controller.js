@@ -36,6 +36,8 @@ const addFavorite = async (req, res) => {
             data: favorite
         });
     } catch (error) {
+        console.log(error);
+
         res.status(500).json({
             status: 'error',
             message: 'Có lỗi xảy ra khi thêm gia sư vào danh sách yêu thích: ' + error.message
