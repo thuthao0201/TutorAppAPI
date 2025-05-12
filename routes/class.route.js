@@ -9,10 +9,14 @@ const {
   completeClass,
   cancelClass,
   rescheduleClass,
-  getClassHistory
+  getClassHistory,
 } = require("../controllers/class.controller");
 
-const {isAdmin, isOwnerOrAdmin, isAdminOrTutor} = require("../middlewares/role.middleware");
+const {
+  isAdmin,
+  isOwnerOrAdmin,
+  isAdminOrTutor,
+} = require("../middlewares/role.middleware");
 
 // Tạo lớp học mới
 router.post("/", createClass);

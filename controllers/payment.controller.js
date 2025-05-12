@@ -1,6 +1,7 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const { compare } = require("bcrypt");
 const Payment = require("../models/payment.model");
+const User = require("../models/user.model");
 
 createPaymentIntent = async (req, res) => {
   const { amount } = req.body;
@@ -59,9 +60,20 @@ const confirmPayment = async (req, res) => {
     payment.status = "completed"; // Update payment status to completed
     await payment.save();
 
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found." });
+    }
+    user.balance += payment.amount; // Update user's balance
+    await user.save();
+
     res
       .status(200)
-      .json({ status: "Success", message: "Payment confirmed successfully." });
+      .json({
+        status: "Success",
+        message: "Payment confirmed successfully.",
+        data: payment,
+      });
   } catch (error) {
     console.error("Error confirming payment:", error);
     res.status(500).json({ message: "Failed to confirm payment." });

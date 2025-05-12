@@ -11,11 +11,11 @@ const {
   changePassword,
   getInformation,
 } = require("../controllers/user.controller");
-const {isAdmin, isOwnerOrAdmin} = require("../middlewares/role.middleware");
+const { isAdmin, isOwnerOrAdmin } = require("../middlewares/role.middleware");
 const upload = require("../configs/multer");
 
 router.post("/", isAdmin, createUser);
-router.get("/information", isOwnerOrAdmin, getInformation);
+router.get("/information", getInformation);
 router.get("/:id", isOwnerOrAdmin, getUser);
 router.get("/", isAdmin, getUsers);
 router.patch("/avatar", isOwnerOrAdmin, upload.single("avatar"), changeAvatar);

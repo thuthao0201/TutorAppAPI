@@ -1,750 +1,229 @@
 const Class = require("../models/class.model");
-const Tutor = require("../models/tutor.model");
+const Post = require("../models/class.model");
 const Booking = require("../models/booking.model");
-const Session = require("../models/session.model");
 const User = require("../models/user.model");
+const Tutor = require("../models/tutor.model");
 
-// Tạo lớp mới từ học viên
+// Create a new class
 const createClass = async (req, res) => {
   try {
-    const studentId = req.user._id;
     const {
+      postId,
+      bookingId,
       subject,
       grade,
       time,
-      day,
       startDate,
       endDate,
       requirements,
-      expectedPrice,
     } = req.body;
 
-    // Kiểm tra thời gian hợp lệ
-    const availableSlots = [
-      "7:00-9:00",
-      "9:30-11:30",
-      "13:00-15:00",
-      "15:30-17:30",
-      "19:00-21:00",
-    ];
+    // Generate a unique room ID
+    const roomId = `room_${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(2, 9)}`;
 
-    if (!availableSlots.includes(time)) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Thời gian học không hợp lệ. Vui lòng chọn ca học hợp lệ",
-      });
-    }
+    let tutorId, studentId;
 
-    // Đảm bảo day luôn là một mảng
-    const dayArray = Array.isArray(day) ? day : [day];
+    // If class is created from a post
+    if (postId) {
+      const postData = await Post.findById(postId);
+      if (!postData) {
+        return res.status(404).json({
+          status: "fail",
+          message: "Không tìm thấy bài đăng",
+        });
+      }
 
-    // Tìm giảng viên có thể dạy môn học này
-    const tutors = await Tutor.find({
-      subjects: {
-        $elemMatch: {
-          subject: subject,
-          grades: grade,
-        },
-      },
-    });
+      tutorId = postData.tutorId;
+      studentId = postData.studentId;
 
-    if (tutors.length === 0) {
-      return res.status(201).json({
-        status: "fail",
-        message:
-          "Không tìm thấy giảng viên dạy môn học này. Vui lòng thử môn học khác.",
-      });
-    }
-
-    // Kiểm tra xung đột lịch giảng viên và giá cả
-    const availableTutor = await checkTutorAvailability(
-      tutors,
-      studentId,
-      time,
-      dayArray,
-      startDate,
-      endDate,
-      expectedPrice
-    );
-
-    if (availableTutor) {
-      // Tạo session mới cho lớp học
-      const newSession = new Session({
-        tutorId: availableTutor._id,
-        studentId: studentId,
-        time,
-        day: dayArray,
-        startDate,
-        endDate,
-        subject,
-        grade,
-        sessionPrice: availableTutor.sessionPrice,
-        status: "active",
-      });
-
-      await newSession.save();
-
-      // Tạo lớp học với trạng thái matched và gắn session
-      const newClass = new Class({
-        subject,
-        grade,
+      // Create the class
+      const classObj = new Class({
+        roomId,
+        tutorId,
         studentId,
-        tutorId: availableTutor._id,
-        time,
-        day: dayArray,
-        startDate,
-        endDate,
-        requirements,
-        expectedPrice: expectedPrice || 0,
-        sessionId: newSession._id,
-        status: "matched",
+        subject: subject || postData.subject,
+        grade: grade || postData.grade,
+        time: time || postData.preferredTime,
+        startDate: startDate || postData.startDate,
+        endDate: endDate || postData.endDate,
+        requirements: requirements || postData.requirements,
       });
 
-      const getWeekdayDatesInRange = (startDate, endDate, weekdays) => {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
-        const dates = [];
+      await classObj.save();
 
-        // Map day strings to day numbers (0 = Sunday, 1 = Monday, etc.)
-        const dayMapping = {
-          sunday: 0,
-          monday: 1,
-          tuesday: 2,
-          wednesday: 3,
-          thursday: 4,
-          friday: 5,
-          saturday: 6,
-        };
-
-        // Convert weekday strings to day numbers
-        const dayNumbers = weekdays.map((day) => dayMapping[day.toLowerCase()]);
-
-        // Clone the start date
-        const current = new Date(start);
-
-        // Iterate through each date in the range
-        while (current <= end) {
-          const dayOfWeek = current.getDay();
-
-          // If current day is in our weekdays list, add it
-          if (dayNumbers.includes(dayOfWeek)) {
-            dates.push(new Date(current));
-          }
-
-          // Move to next day
-          current.setDate(current.getDate() + 1);
-        }
-
-        return dates;
-      };
-
-      // Lấy tất cả các ngày trong khoảng thời gian đã chọn
-      const requestedDates = getWeekdayDatesInRange(
-        startDate,
-        endDate,
-        dayArray
-      );
-
-      // Trừ tiền từ tài khoản học viên
-      const student = await User.findById(studentId);
-      if (student.balance < expectedPrice * requestedDates.length) {
-        return res.status(200).json({
-          status: "fail",
-          message: "Số dư tài khoản không đủ để thanh toán lớp học này",
-        });
-      }
-      student.balance -= expectedPrice * requestedDates.length;
-      await student.save();
-
-      const tutorAvailable = await Tutor.findById(availableTutor._id);
-      if (!tutorAvailable) {
-        return res.status(404).json({
-          status: "fail",
-          message: "Không tìm thấy thông tin giảng viên",
-        });
-      }
-
-      const userTutor = await User.findById(tutorAvailable.userId);
-      if (!userTutor) {
-        return res.status(404).json({
-          status: "fail",
-          message: "Không tìm thấy thông tin người dùng giảng viên",
-        });
-      }
-
-      userTutor.pendingBalance += expectedPrice * requestedDates.length;
-      await userTutor.save();
-      await newClass.save();
+      // Update post with class ID
+      postData.classId = classObj._id;
+      await postData.save();
 
       return res.status(201).json({
         status: "success",
-        message: "Đã tìm thấy giảng viên phù hợp cho lớp học của bạn",
-        data: {
-          class: newClass,
-          tutor: availableTutor,
-        },
+        data: classObj,
       });
-    } else {
-      // Không tạo lớp khi không tìm thấy giảng viên phù hợp
-      // Thay vào đó, tìm các thời gian thay thế và trả về
-      const alternativeTimes = await findAlternativeTimes(
-        subject,
-        grade,
-        dayArray,
-        expectedPrice,
-        studentId,
-        time
-      );
+    }
 
-      if (alternativeTimes.length > 0) {
-        return res.status(200).json({
+    // If class is created from a booking
+    if (bookingId) {
+      const booking = await Booking.findById(bookingId);
+      if (!booking) {
+        return res.status(404).json({
           status: "fail",
-          message:
-            "Không tìm thấy giảng viên phù hợp cho thời gian bạn chọn. Vui lòng xem xét các thời gian thay thế.",
-          data: {
-            alternativeTimes,
-          },
-        });
-      } else {
-        // Không tìm thấy giảng viên và không có thời gian thay thế
-        return res.status(200).json({
-          status: "fail",
-          message:
-            "Không tìm thấy giảng viên phù hợp. Vui lòng thử lại sau hoặc chọn thời gian khác.",
+          message: "Không tìm thấy đặt lịch",
         });
       }
+
+      // Create the class
+      const classObj = new Class({
+        roomId,
+        tutorId: booking.tutorId,
+        studentId: booking.studentId,
+        subject: subject || booking.subject,
+        grade: grade || booking.grade,
+        time: time || booking.time,
+        startDate: startDate || booking.startDate,
+        endDate: endDate || booking.endDate,
+        requirements: requirements || booking.requirements,
+      });
+
+      await classObj.save();
+
+      // Update booking with class ID
+      booking.classId = classObj._id;
+      await booking.save();
+
+      return res.status(201).json({
+        status: "success",
+        data: classObj,
+      });
     }
+
+    // If class is created directly
+    const classObj = new Class({
+      roomId,
+      tutorId: req.body.tutorId,
+      studentId: req.body.studentId,
+      subject,
+      grade,
+      time,
+      startDate,
+      endDate,
+      requirements,
+    });
+
+    await classObj.save();
+
+    return res.status(201).json({
+      status: "success",
+      data: classObj,
+    });
   } catch (error) {
-    res.status(400).json({
+    res.status(500).json({
       status: "error",
       message: "Có lỗi xảy ra khi tạo lớp học: " + error.message,
     });
   }
 };
 
-// Hàm kiểm tra xung đột lịch của giảng viên
-const checkTutorAvailability = async (
-  tutors,
-  studentId,
-  time,
-  days,
-  startDate,
-  endDate,
-  expectedPrice
-) => {
-  try {
-    // Helper function to get all occurrences of specific weekdays within a date range
-    const getWeekdayDatesInRange = (startDate, endDate, weekdays) => {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const dates = [];
-
-      // Map day strings to day numbers (0 = Sunday, 1 = Monday, etc.)
-      const dayMapping = {
-        sunday: 0,
-        monday: 1,
-        tuesday: 2,
-        wednesday: 3,
-        thursday: 4,
-        friday: 5,
-        saturday: 6,
-      };
-
-      // Convert weekday strings to day numbers
-      const dayNumbers = weekdays.map((day) => dayMapping[day.toLowerCase()]);
-
-      // Clone the start date
-      const current = new Date(start);
-
-      // Iterate through each date in the range
-      while (current <= end) {
-        const dayOfWeek = current.getDay();
-
-        // If current day is in our weekdays list, add it
-        if (dayNumbers.includes(dayOfWeek)) {
-          dates.push(new Date(current));
-        }
-
-        // Move to next day
-        current.setDate(current.getDate() + 1);
-      }
-
-      return dates;
-    };
-
-    // Get actual calendar dates for the requested class
-    const requestedDates = getWeekdayDatesInRange(startDate, endDate, days);
-
-    // If no specific dates match the criteria, there's nothing to book
-    if (requestedDates.length === 0) {
-      return null;
-    }
-
-    // Filter tutors based on price first if expectedPrice is set
-    let eligibleTutors = tutors;
-    if (expectedPrice > 0) {
-      eligibleTutors = tutors.filter(
-        (tutor) => tutor.sessionPrice <= expectedPrice
-      );
-    }
-
-    // No tutors meet the price criteria
-    if (eligibleTutors.length === 0) {
-      return null;
-    }
-
-    // For each tutor, check if they have available schedule and no conflicts
-    const availableTutors = [];
-
-    for (const tutor of eligibleTutors) {
-      // Check if tutor's availableSchedule includes the requested days and time
-      const hasAvailableSchedule = days.every((day) => {
-        const daySchedule = tutor.availableSchedule.find(
-          (schedule) => schedule.day === day
-        );
-        return daySchedule && daySchedule.timeSlots.includes(time);
-      });
-
-      if (!hasAvailableSchedule) {
-        continue;
-      }
-
-      // Find all sessions that might conflict for this tutor
-      const potentialConflictSessions = await Session.find({
-        $or: [{ tutorId: tutor._id }, { studentId: studentId }],
-        time: time,
-        status: "active",
-      });
-
-      // Check for actual conflicts on specific dates
-      let hasConflict = false;
-      for (const session of potentialConflictSessions) {
-        // Get actual calendar dates for the existing session
-        const sessionDates = getWeekdayDatesInRange(
-          session.startDate,
-          session.endDate,
-          session.day
-        );
-
-        // Check if any specific dates overlap
-        const conflictingDates = requestedDates.filter((reqDate) =>
-          sessionDates.some(
-            (sessDate) =>
-              reqDate.getFullYear() === sessDate.getFullYear() &&
-              reqDate.getMonth() === sessDate.getMonth() &&
-              reqDate.getDate() === sessDate.getDate()
-          )
-        );
-
-        if (conflictingDates.length > 0) {
-          hasConflict = true;
-          break;
-        }
-      }
-
-      // If no conflicts, add to available tutors
-      if (!hasConflict) {
-        availableTutors.push(tutor);
-      }
-    }
-    console.log(availableTutors);
-
-    // Sort tutors by trustScore (highest first)
-    availableTutors.sort((a, b) => b.trustScore - a.trustScore);
-
-    // Return the best matching tutor (highest trustScore)
-    return availableTutors.length > 0 ? availableTutors[0] : null;
-  } catch (error) {
-    console.error("Lỗi khi kiểm tra lịch giảng viên:", error);
-    return null;
-  }
-};
-
-// Hàm tìm giảng viên phù hợp
-const findAvailableTutors = async (subject, grade, time, days) => {
-  try {
-    // Tìm giảng viên có thể dạy môn học và cấp độ này
-    const tutors = await Tutor.find({
-      subjects: {
-        $elemMatch: {
-          subject: subject,
-          grades: grade,
-        },
-      },
-    });
-
-    // Lọc giảng viên có lịch trống vào thời gian yêu cầu
-    const availableTutors = [];
-
-    for (const tutor of tutors) {
-      let isAvailable = true;
-
-      // Kiểm tra từng ngày trong danh sách ngày yêu cầu
-      for (const day of days) {
-        const bookedSlots =
-          tutor.schedule && tutor.schedule[day] ? tutor.schedule[day] : [];
-
-        if (bookedSlots.includes(time)) {
-          isAvailable = false;
-          break;
-        }
-      }
-
-      if (isAvailable) {
-        availableTutors.push(tutor);
-      }
-    }
-
-    return availableTutors;
-  } catch (error) {
-    console.error("Lỗi khi tìm giảng viên phù hợp:", error);
-    return [];
-  }
-};
-
-// Hàm tìm các thời gian thay thế
-const findAlternativeTimes = async (
-  subject,
-  grade,
-  preferredDays,
-  expectedPrice,
-  studentId,
-  preferredTime
-) => {
-  try {
-    const availableSlots = [
-      "7:00-9:00",
-      "9:30-11:30",
-      "13:00-15:00",
-      "15:30-17:30",
-      "19:00-21:00",
-    ];
-
-    const allDays = [
-      "Monday",
-      "Tuesday",
-      "Wednesday",
-      "Thursday",
-      "Friday",
-      "Saturday",
-      "Sunday",
-    ];
-
-    // Cấu trúc dữ liệu cho các thời gian thay thế, phân loại theo mức độ ưu tiên
-    const alternatives = {
-      sameDayDifferentTime: [], // Cùng ngày, khác ca
-      sameTimeDifferentDay: [], // Cùng ca, khác ngày
-      sameDayTimeHigherPrice: [], // Cùng ngày và ca nhưng giá cao hơn
-      otherOptions: [], // Các lựa chọn khác
-    };
-
-    // Helper function to get all occurrences of specific weekdays within a date range
-    const getWeekdayDatesInRange = (startDate, endDate, weekdays) => {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const dates = [];
-
-      // Map day strings to day numbers (0 = Sunday, 1 = Monday, etc.)
-      const dayMapping = {
-        sunday: 0,
-        monday: 1,
-        tuesday: 2,
-        wednesday: 3,
-        thursday: 4,
-        friday: 5,
-        saturday: 6,
-      };
-
-      // Convert weekday strings to day numbers
-      const dayNumbers = weekdays.map((day) => dayMapping[day.toLowerCase()]);
-
-      // Clone the start date
-      const current = new Date(start);
-
-      // Iterate through each date in the range
-      while (current <= end) {
-        const dayOfWeek = current.getDay();
-
-        // If current day is in our weekdays list, add it
-        if (dayNumbers.includes(dayOfWeek)) {
-          dates.push(new Date(current));
-        }
-
-        // Move to next day
-        current.setDate(current.getDate() + 1);
-      }
-
-      return dates;
-    };
-
-    // Tìm giảng viên có thể dạy môn học và cấp độ này
-    const tutors = await Tutor.find({
-      subjects: {
-        $elemMatch: {
-          subject: subject,
-          grades: grade,
-        },
-      },
-    }).populate("userId", "name email avatar");
-
-    // Không lọc giảng viên theo giá ngay từ đầu
-    const eligibleTutors = tutors;
-
-    // Lấy tất cả các session hiện tại của học viên để kiểm tra xung đột
-    const studentSessions = await Session.find({
-      studentId: studentId,
-      status: "active",
-    });
-
-    // Kiểm tra từng giảng viên
-    for (const tutor of eligibleTutors) {
-      // Tạo danh sách các khung giờ và ngày mà giảng viên này có thể dạy dựa trên availableSchedule
-      const tutorAvailableSlots = [];
-
-      for (const day of allDays) {
-        const daySchedule = tutor.availableSchedule.find(
-          (schedule) => schedule.day === day
-        );
-        if (daySchedule) {
-          for (const timeSlot of daySchedule.timeSlots) {
-            tutorAvailableSlots.push({ day, time: timeSlot });
-          }
-        }
-      }
-
-      // Lấy tất cả các session hiện tại của giảng viên để kiểm tra xung đột
-      const tutorSessions = await Session.find({
-        tutorId: tutor._id,
-        status: "active",
-      });
-
-      // Kiểm tra từng khung giờ có sẵn
-      for (const slot of tutorAvailableSlots) {
-        // Đánh dấu slot là ngày ưu tiên và ca ưu tiên
-        const isPreferredDay = preferredDays.includes(slot.day);
-        const isPreferredTime = slot.time === preferredTime;
-        const isPriceWithinBudget =
-          expectedPrice === 0 || tutor.sessionPrice <= expectedPrice;
-
-        // Kiểm tra xem slot này có xung đột với session của giảng viên không
-        let hasTutorConflict = false;
-        for (const session of tutorSessions) {
-          if (session.time === slot.time && session.day.includes(slot.day)) {
-            hasTutorConflict = true;
-            break;
-          }
-        }
-
-        // Kiểm tra xem slot này có xung đột với session của học viên không
-        let hasStudentConflict = false;
-        for (const session of studentSessions) {
-          if (session.time === slot.time && session.day.includes(slot.day)) {
-            hasStudentConflict = true;
-            break;
-          }
-        }
-
-        // Thêm vào danh sách thời gian thay thế nếu không có xung đột cho cả giảng viên và học viên
-        if (!hasTutorConflict && !hasStudentConflict) {
-          const alternativeOption = {
-            time: slot.time,
-            days: [slot.day],
-            tutorId: tutor._id,
-            sessionPrice: tutor.sessionPrice,
-            tutorName: tutor.userId?.name || "Gia sư",
-            isPreferredDay,
-            isPreferredTime,
-            isPriceWithinBudget,
-            trustScore: tutor.trustScore || 0,
-          };
-
-          // Phân loại thời gian thay thế theo mức độ ưu tiên
-          if (isPreferredDay && isPreferredTime && !isPriceWithinBudget) {
-            // Cùng ngày và ca nhưng giá cao hơn
-            alternatives.sameDayTimeHigherPrice.push(alternativeOption);
-          } else if (isPreferredDay && !isPreferredTime) {
-            // Cùng ngày, khác ca
-            alternatives.sameDayDifferentTime.push(alternativeOption);
-          } else if (!isPreferredDay && isPreferredTime) {
-            // Cùng ca, khác ngày
-            alternatives.sameTimeDifferentDay.push(alternativeOption);
-          } else {
-            // Các lựa chọn khác
-            alternatives.otherOptions.push(alternativeOption);
-          }
-        }
-      }
-    }
-
-    // Gộp các lựa chọn từ các danh sách theo thứ tự ưu tiên
-    let combinedAlternatives = [];
-
-    // Hàm kết hợp các slot có cùng thời gian và cùng giảng viên
-    const combineSlots = (altList) => {
-      const combined = [];
-
-      for (const alt of altList) {
-        const existingIndex = combined.findIndex(
-          (item) =>
-            item.time === alt.time &&
-            item.tutorId.toString() === alt.tutorId.toString()
-        );
-
-        if (existingIndex !== -1) {
-          // Kết hợp ngày nếu đã có slot với cùng giảng viên và cùng giờ
-          for (const day of alt.days) {
-            if (!combined[existingIndex].days.includes(day)) {
-              combined[existingIndex].days.push(day);
-            }
-          }
-        } else {
-          combined.push({ ...alt });
-        }
-      }
-
-      return combined;
-    };
-
-    // Sắp xếp từng danh sách và kết hợp các slot
-    // 1. Ưu tiên cùng ngày, khác ca
-    alternatives.sameDayDifferentTime.sort(
-      (a, b) => a.sessionPrice - b.sessionPrice
-    );
-    combinedAlternatives = [
-      ...combinedAlternatives,
-      ...combineSlots(alternatives.sameDayDifferentTime),
-    ];
-
-    // 2. Cùng ca, khác ngày
-    alternatives.sameTimeDifferentDay.sort(
-      (a, b) => a.sessionPrice - b.sessionPrice
-    );
-    combinedAlternatives = [
-      ...combinedAlternatives,
-      ...combineSlots(alternatives.sameTimeDifferentDay),
-    ];
-
-    // 3. Cùng ngày và ca nhưng giá cao hơn
-    alternatives.sameDayTimeHigherPrice.sort(
-      (a, b) => a.sessionPrice - b.sessionPrice
-    );
-    combinedAlternatives = [
-      ...combinedAlternatives,
-      ...combineSlots(alternatives.sameDayTimeHigherPrice),
-    ];
-
-    // 4. Các lựa chọn khác
-    alternatives.otherOptions.sort((a, b) => {
-      // Ưu tiên theo giá, sau đó theo trustScore
-      if (a.sessionPrice !== b.sessionPrice) {
-        return a.sessionPrice - b.sessionPrice;
-      }
-      return b.trustScore - a.trustScore;
-    });
-    combinedAlternatives = [
-      ...combinedAlternatives,
-      ...combineSlots(alternatives.otherOptions),
-    ];
-
-    // Giới hạn số lượng thời gian thay thế
-    return combinedAlternatives.slice(0, 10);
-  } catch (error) {
-    console.error("Lỗi khi tìm thời gian thay thế:", error);
-    return [];
-  }
-};
-
-// Lấy danh sách lớp học
+// Get all classes with filtering options
 const getClasses = async (req, res) => {
   try {
     const role = req.user.role;
-    if (role === "tutor") {
-      return getClassesOfTutor(req, res);
-    }
-    return getClassesOfStudent(req, res);
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Có lỗi xảy ra khi lấy danh sách lớp học: " + error.message,
-    });
-  }
-};
-
-// Lấy danh sách lớp học của giảng viên
-const getClassesOfTutor = async (req, res) => {
-  try {
     const userId = req.user._id;
-    const tutor = await Tutor.findOne({ userId });
 
-    if (!tutor) {
-      return res.status(404).json({
-        status: "fail",
-        message: "Không tìm thấy thông tin giảng viên",
-      });
+    let query = {};
+
+    // Filter by date range if provided
+    if (req.query.startDate && req.query.endDate) {
+      query.startDate = { $gte: new Date(req.query.startDate) };
+      query.endDate = { $lte: new Date(req.query.endDate) };
     }
 
-    const classes = await Class.find({ tutorId: tutor._id })
-      .populate("studentId", "name email avatar")
-      .populate("sessionId");
+    // Filter by subject if provided
+    if (req.query.subject) {
+      query.subject = req.query.subject;
+    }
 
-    res.json({
-      status: "success",
-      data: classes,
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Có lỗi xảy ra khi lấy danh sách lớp học: " + error.message,
-    });
-  }
-};
+    // Filter by status if provided
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
 
-// Lấy danh sách lớp học của học viên
-const getClassesOfStudent = async (req, res) => {
-  try {
-    const studentId = req.user._id;
-    const classes = await Class.find({ studentId })
-      .populate({
-        path: "studentId",
-        select: "name email avatar",
-      })
-      .populate("sessionId");
+    // For tutors, show only their classes
+    if (role === "tutor") {
+      const tutor = await Tutor.findOne({ userId });
+      if (!tutor) {
+        return res.status(404).json({
+          status: "fail",
+          message: "Không tìm thấy thông tin gia sư",
+        });
+      }
+      query.tutorId = tutor._id;
+    }
+    // For students, show only their classes
+    else {
+      query.studentId = userId;
+    }
+    // Admin can see all classes
+    console.log(role);
 
-    res.json({
-      status: "success",
-      data: classes,
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: "Có lỗi xảy ra khi lấy danh sách lớp học: " + error.message,
-    });
-  }
-};
+    console.log(query);
 
-// Lấy thông tin chi tiết lớp học
-const getClass = async (req, res) => {
-  try {
-    const classId = req.params.id;
-    const classInfo = await Class.findById(classId)
+    const classes = await Class.find(query)
       .populate({
         path: "tutorId",
-        populate: { path: "userId", select: "name email avatar" },
+        populate: { path: "userId", select: "name email avatar phone" },
       })
       .populate("studentId", "name email avatar")
-      .populate("sessionId")
-      .populate("bookingId");
+      .sort({ startDate: -1 });
 
-    if (!classInfo) {
+    res.json({
+      status: "success",
+      results: classes.length,
+      data: classes,
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      status: "error",
+      message: "Có lỗi xảy ra khi lấy danh sách lớp học: " + error,
+    });
+  }
+};
+
+// Get specific class by ID
+const getClass = async (req, res) => {
+  try {
+    const classObj = await Class.findById(req.params.id)
+      .populate({
+        path: "tutorId",
+        populate: { path: "userId", select: "name email avatar phone" },
+      })
+      .populate("studentId", "name email avatar phone");
+
+    if (!classObj) {
       return res.status(404).json({
         status: "fail",
-        message: "Không tìm thấy thông tin lớp học",
+        message: "Không tìm thấy lớp học",
+      });
+    }
+
+    // Check permissions - only related users or admins can view class details
+    if (
+      req.user.role !== "admin" &&
+      classObj.studentId._id.toString() !== req.user._id.toString() &&
+      classObj.tutorId.userId._id.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        status: "fail",
+        message: "Bạn không có quyền truy cập thông tin này",
       });
     }
 
     res.json({
       status: "success",
-      data: classInfo,
+      data: classObj,
     });
   } catch (error) {
     res.status(500).json({
@@ -754,99 +233,67 @@ const getClass = async (req, res) => {
   }
 };
 
-// Chọn thời gian thay thế
-const selectAlternativeTime = async (req, res) => {
+// Update class details
+const updateClass = async (req, res) => {
   try {
     const classId = req.params.id;
-    const { alternativeIndex } = req.body;
+    const classObj = await Class.findById(classId);
 
-    const classInfo = await Class.findById(classId);
-
-    if (!classInfo) {
+    if (!classObj) {
       return res.status(404).json({
         status: "fail",
-        message: "Không tìm thấy thông tin lớp học",
+        message: "Không tìm thấy lớp học",
       });
     }
 
-    // Kiểm tra quyền truy cập
-    if (classInfo.studentId.toString() !== req.user._id.toString()) {
+    // Only tutors assigned to this class or admins can update
+    if (
+      req.user.role !== "admin" &&
+      classObj.tutorId.toString() !== req.user._id.toString()
+    ) {
       return res.status(403).json({
         status: "fail",
-        message: "Bạn không có quyền thực hiện hành động này",
+        message: "Bạn không có quyền cập nhật lớp học này",
       });
     }
 
-    // Kiểm tra index hợp lệ
-    if (
-      !classInfo.alternativeTimes ||
-      alternativeIndex >= classInfo.alternativeTimes.length
-    ) {
-      return res.status(400).json({
-        status: "fail",
-        message: "Thời gian thay thế không hợp lệ",
-      });
-    }
-
-    const selectedAlternative = classInfo.alternativeTimes[alternativeIndex];
-
-    // Cập nhật lớp học với thời gian đã chọn
-    classInfo.time = selectedAlternative.time;
-    classInfo.day = selectedAlternative.days;
-    classInfo.tutorId = selectedAlternative.tutorId;
-    classInfo.status = "matched";
-    classInfo.alternativeTimes = [];
-
-    await classInfo.save();
-
-    // Tạo booking tương ứng
-    const booking = new Booking({
-      tutorId: selectedAlternative.tutorId,
-      userId: classInfo.studentId,
-      time: selectedAlternative.time,
-      day: selectedAlternative.days,
-      startDate: classInfo.startDate,
-      endDate: classInfo.endDate,
-      requirements: classInfo.requirements,
-      status: "accepted",
+    // Update class with provided data
+    const updatedClass = await Class.findByIdAndUpdate(classId, req.body, {
+      new: true,
+      runValidators: true,
     });
-
-    await booking.save();
-
-    // Cập nhật lớp với booking ID
-    classInfo.bookingId = booking._id;
-    await classInfo.save();
 
     res.json({
       status: "success",
-      message: "Đã chọn thời gian thay thế thành công",
-      data: classInfo,
+      data: updatedClass,
     });
   } catch (error) {
     res.status(500).json({
       status: "error",
-      message: "Có lỗi xảy ra khi chọn thời gian thay thế: " + error.message,
+      message: "Có lỗi xảy ra khi cập nhật lớp học: " + error.message,
     });
   }
 };
 
-// Hủy lớp học
-const cancelClass = async (req, res) => {
+// Mark class as completed
+const completeClass = async (req, res) => {
   try {
     const classId = req.params.id;
-    const classInfo = await Class.findById(classId);
+    const { notes, rating } = req.body;
 
-    if (!classInfo) {
+    const classObj = await Class.findById(classId);
+
+    if (!classObj) {
       return res.status(404).json({
         status: "fail",
-        message: "Không tìm thấy thông tin lớp học",
+        message: "Không tìm thấy lớp học",
       });
     }
 
-    // Kiểm tra quyền truy cập
+    // Only tutors assigned to this class or admins can mark as complete
     if (
-      classInfo.studentId.toString() !== req.user._id.toString() &&
-      req.user.role !== "admin"
+      req.user.role !== "admin" &&
+      classObj.tutorId.toString() !== req.user._id.toString()
     ) {
       return res.status(403).json({
         status: "fail",
@@ -854,25 +301,335 @@ const cancelClass = async (req, res) => {
       });
     }
 
-    // Cập nhật trạng thái lớp học
-    classInfo.status = "canceled";
-    await classInfo.save();
+    classObj.status = "completed";
+    classObj.completedAt = new Date();
+    classObj.notes = notes;
 
-    // Nếu đã có booking, hủy booking
-    if (classInfo.bookingId) {
-      await Booking.findByIdAndUpdate(classInfo.bookingId, {
-        status: "canceled",
-      });
+    // Thưởng điểm uy tín cho tutor khi hoàn thành buổi học
+    const tutor = await Tutor.findById(classObj.tutorId);
+
+    // Thêm điểm uy tín, nhưng không vượt quá 100
+    const rewardPoints = 1; // Thưởng 1 điểm cho mỗi buổi học hoàn thành
+    tutor.trustScore = Math.min(100, tutor.trustScore + rewardPoints);
+
+    // Tính số buổi học thành công liên tiếp
+    if (!tutor.consecutiveCompletedSessions) {
+      tutor.consecutiveCompletedSessions = 0;
     }
+    tutor.consecutiveCompletedSessions += 1;
+
+    // Thưởng thêm điểm nếu có chuỗi buổi học thành công liên tiếp
+    if (tutor.consecutiveCompletedSessions % 5 === 0) {
+      // Thưởng thêm 2 điểm sau mỗi 5 buổi học thành công liên tiếp
+      const bonusPoints = 2;
+      tutor.trustScore = Math.min(100, tutor.trustScore + bonusPoints);
+    }
+
+    // If rating is provided, update it
+    if (rating) {
+      classObj.rating = rating;
+
+      // Update tutor's average rating
+      const newTotalRating = tutor.avgRating * tutor.totalReviews + rating;
+      tutor.totalReviews += 1;
+      tutor.avgRating = newTotalRating / tutor.totalReviews;
+    }
+
+    await tutor.save();
+    await classObj.save();
+
+    // Increment completedSessions for the tutor
+    await Tutor.findByIdAndUpdate(classObj.tutorId, {
+      $inc: {
+        completedSessions: 1,
+        consecutiveCompletedSessions: 1,
+        totalSessions: 1,
+      },
+    });
 
     res.json({
       status: "success",
-      message: "Đã hủy lớp học thành công",
+      message: "Lớp học đã được đánh dấu là hoàn thành",
+      data: {
+        class: classObj,
+        trustScoreAdded:
+          rewardPoints + (tutor.consecutiveCompletedSessions % 5 === 0 ? 2 : 0),
+      },
     });
   } catch (error) {
     res.status(500).json({
       status: "error",
-      message: "Có lỗi xảy ra khi hủy lớp học: " + error.message,
+      message: "Có lỗi xảy ra khi hoàn thành lớp học: " + error.message,
+    });
+  }
+};
+
+// Cancel a class
+const cancelClass = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const userId = req.user._id;
+    const userRole = req.user.role;
+
+    // Tìm class cần hủy
+    const classObj = await Class.findById(id);
+
+    if (!classObj) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Không tìm thấy buổi học này",
+      });
+    }
+
+    // Kiểm tra nếu buổi học đã hoàn thành
+    if (classObj.status === "completed") {
+      return res.status(400).json({
+        status: "fail",
+        message: "Không thể hủy buổi học đã hoàn thành",
+      });
+    }
+
+    // Kiểm tra quyền hủy class
+    let canceledBy;
+    if (userRole === "tutor") {
+      const tutor = await Tutor.findOne({ userId });
+      if (!tutor || tutor._id.toString() !== classObj.tutorId.toString()) {
+        return res.status(403).json({
+          status: "fail",
+          message: "Bạn không có quyền hủy buổi học này",
+        });
+      }
+      canceledBy = "tutor";
+    } else if (userRole === "student") {
+      if (
+        classObj.studentId &&
+        classObj.studentId.toString() !== userId.toString()
+      ) {
+        return res.status(403).json({
+          status: "fail",
+          message: "Bạn không có quyền hủy buổi học này",
+        });
+      }
+      canceledBy = "student";
+    } else if (userRole === "admin") {
+      canceledBy = "admin";
+    }
+
+    // Cập nhật trạng thái class
+    classObj.status = "canceled";
+    classObj.canceledBy = canceledBy;
+    classObj.cancelReason = reason || "Không có lý do được cung cấp";
+    classObj.canceledAt = new Date();
+
+    // Nếu giảng viên hủy class, tính điểm phạt
+    let penaltyPoints = 0;
+    if (canceledBy === "tutor") {
+      const tutor = await Tutor.findById(classObj.tutorId);
+
+      // Tính thời gian còn lại trước buổi học (tính theo giờ)
+      const classStartDate = new Date(classObj.startDate);
+      const now = new Date();
+      const hoursRemaining = Math.max(
+        0,
+        (classStartDate - now) / (1000 * 60 * 60)
+      );
+
+      // Tính điểm phạt dựa trên thời gian còn lại
+      if (hoursRemaining < 2) {
+        // Hủy gấp (dưới 2 giờ trước buổi học)
+        penaltyPoints = 10;
+      } else if (hoursRemaining < 24) {
+        // Hủy trong ngày (dưới 24 giờ)
+        penaltyPoints = 5;
+      } else if (hoursRemaining < 72) {
+        // Hủy trước 3 ngày
+        penaltyPoints = 3;
+      } else {
+        // Hủy sớm (trước 3 ngày trở lên)
+        penaltyPoints = 1;
+      }
+
+      // Trừ điểm uy tín của giảng viên
+      if (tutor) {
+        tutor.trustScore = Math.max(0, tutor.trustScore - penaltyPoints);
+        tutor.consecutiveCompletedSessions = 0; // Reset số buổi học thành công liên tiếp
+        await tutor.save();
+      }
+    }
+
+    await classObj.save();
+
+    // Nếu class liên kết với booking, cập nhật trạng thái booking
+    if (classObj.bookingId) {
+      const booking = await Booking.findById(classObj.bookingId);
+      if (booking) {
+        booking.status = "canceled";
+        booking.canceledBy = canceledBy;
+        booking.cancelReason = reason || "Không có lý do được cung cấp";
+        await booking.save();
+      }
+    }
+
+    // Reset consecutive completed sessions counter for the tutor
+    await Tutor.findByIdAndUpdate(classObj.tutorId, {
+      consecutiveCompletedSessions: 0,
+    });
+
+    res.json({
+      status: "success",
+      message: "Hủy buổi học thành công",
+      data: {
+        class: classObj,
+        trustScoreDeducted: canceledBy === "tutor" ? penaltyPoints : 0,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Có lỗi xảy ra khi hủy buổi học: " + error.message,
+    });
+  }
+};
+
+// Reschedule a class
+const rescheduleClass = async (req, res) => {
+  try {
+    const classId = req.params.id;
+    const { newStartDate, newEndDate, newTime, reason } = req.body;
+
+    if (!newStartDate || !newEndDate || !newTime) {
+      return res.status(400).json({
+        status: "fail",
+        message: "Vui lòng cung cấp thời gian mới cho lớp học",
+      });
+    }
+
+    const classObj = await Class.findById(classId);
+
+    if (!classObj) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Không tìm thấy lớp học",
+      });
+    }
+
+    // Only participants (student, tutor) or admin can reschedule
+    if (
+      req.user.role !== "admin" &&
+      classObj.studentId.toString() !== req.user._id.toString() &&
+      classObj.tutorId.toString() !== req.user._id.toString()
+    ) {
+      return res.status(403).json({
+        status: "fail",
+        message: "Bạn không có quyền lên lịch lại lớp học này",
+      });
+    }
+
+    // Store old values for history
+    const oldSchedule = {
+      startDate: classObj.startDate,
+      endDate: classObj.endDate,
+      time: classObj.time,
+    };
+
+    // Update with new schedule
+    classObj.startDate = new Date(newStartDate);
+    classObj.endDate = new Date(newEndDate);
+    classObj.time = newTime;
+    classObj.rescheduleReason = reason;
+    classObj.rescheduledBy = req.user._id;
+    classObj.rescheduledAt = new Date();
+
+    // Add to reschedule history if it doesn't exist
+    if (!classObj.rescheduleHistory) {
+      classObj.rescheduleHistory = [];
+    }
+
+    classObj.rescheduleHistory.push({
+      oldSchedule,
+      newSchedule: {
+        startDate: classObj.startDate,
+        endDate: classObj.endDate,
+        time: classObj.time,
+      },
+      rescheduledBy: req.user._id,
+      rescheduledAt: new Date(),
+      reason,
+    });
+
+    await classObj.save();
+
+    res.json({
+      status: "success",
+      message: "Lớp học đã được lên lịch lại thành công",
+      data: classObj,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Có lỗi xảy ra khi lên lịch lại lớp học: " + error.message,
+    });
+  }
+};
+
+// Get class history for a specific post or booking
+const getClassHistory = async (req, res) => {
+  try {
+    const { postId, bookingId } = req.query;
+
+    let query = {};
+
+    if (postId) {
+      const postData = await Post.findById(postId);
+      if (!postData) {
+        return res.status(404).json({
+          status: "fail",
+          message: "Không tìm thấy bài đăng",
+        });
+      }
+
+      query = {
+        tutorId: postData.tutorId,
+        studentId: postData.studentId,
+      };
+    } else if (bookingId) {
+      const booking = await Booking.findById(bookingId);
+      if (!booking) {
+        return res.status(404).json({
+          status: "fail",
+          message: "Không tìm thấy đặt lịch",
+        });
+      }
+
+      query = {
+        tutorId: booking.tutorId,
+        studentId: booking.studentId,
+      };
+    } else {
+      return res.status(400).json({
+        status: "fail",
+        message: "Vui lòng cung cấp ID bài đăng hoặc ID đặt lịch",
+      });
+    }
+
+    const classes = await Class.find(query)
+      .sort({ startDate: -1 })
+      .populate({
+        path: "tutorId",
+        populate: { path: "userId", select: "name email avatar" },
+      })
+      .populate("studentId", "name email avatar");
+
+    res.json({
+      status: "success",
+      results: classes.length,
+      data: classes,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Có lỗi xảy ra khi lấy lịch sử lớp học: " + error.message,
     });
   }
 };
@@ -881,6 +638,9 @@ module.exports = {
   createClass,
   getClasses,
   getClass,
-  selectAlternativeTime,
+  updateClass,
+  completeClass,
   cancelClass,
+  rescheduleClass,
+  getClassHistory,
 };
