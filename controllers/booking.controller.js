@@ -168,7 +168,7 @@ const createBooking = async (req, res) => {
       });
     }
 
-    const totalPrice = tutor.classPrice * numberOfSessions;
+    const totalPrice = tutor.classPrice;
 
     if (user.balance < totalPrice) {
       return res.status(400).json({
@@ -206,6 +206,8 @@ const createBooking = async (req, res) => {
       requirements,
       classPrice: totalPrice,
       status: "active",
+      joinUrl:
+        "https://meet.jit.si/" + Math.random().toString(36).substring(2, 15),
     });
 
     await newClass.save();

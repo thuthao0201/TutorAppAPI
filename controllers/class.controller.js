@@ -3,6 +3,7 @@ const Post = require("../models/class.model");
 const Booking = require("../models/booking.model");
 const User = require("../models/user.model");
 const Tutor = require("../models/tutor.model");
+const Payment = require("../models/payment.model");
 
 // Create a new class
 const createClass = async (req, res) => {
@@ -176,6 +177,8 @@ const getClasses = async (req, res) => {
       })
       .populate("studentId", "name email avatar")
       .sort({ startDate: -1 });
+
+    console.log(classes);
 
     res.json({
       status: "success",
@@ -634,6 +637,333 @@ const getClassHistory = async (req, res) => {
   }
 };
 
+const getClassStats = async (req, res) => {
+  try {
+    const today = new Date();
+    const currentDay = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const currentHour = today.getHours();
+    const currentMinute = today.getMinutes();
+
+    // Map JS day (0-6) to day names
+    const dayMapping = {
+      0: "Sunday",
+      1: "Monday",
+      2: "Tuesday",
+      3: "Wednesday",
+      4: "Thursday",
+      5: "Friday",
+      6: "Saturday",
+    };
+
+    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastDayOfMonth = new Date(
+      today.getFullYear(),
+      today.getMonth() + 1,
+      0
+    );
+
+    // Base query conditions for the current month
+    const monthCondition = {
+      $or: [
+        // Classes starting this month
+        { startDate: { $gte: firstDayOfMonth, $lte: lastDayOfMonth } },
+        // Classes ending this month
+        { endDate: { $gte: firstDayOfMonth, $lte: lastDayOfMonth } },
+        // Classes that started before this month but end after this month (spanning classes)
+        {
+          startDate: { $lt: firstDayOfMonth },
+          endDate: { $gt: lastDayOfMonth },
+        },
+      ],
+    };
+
+    // Fetch all classes for this month for detailed processing
+    const monthlyClasses = await Class.find(monthCondition).lean();
+
+    // Helper function to determine if a class time has passed today
+    const hasTimeSlotPassed = (timeSlot) => {
+      if (!timeSlot) return false;
+
+      const [startTime] = timeSlot.split("-");
+      const [startHour, startMinute] = startTime.split(":").map(Number);
+
+      // If current hour is greater, time has passed
+      if (currentHour > startHour) return true;
+      // If current hour is the same, check minutes
+      if (currentHour === startHour && currentMinute > startMinute) return true;
+
+      return false;
+    };
+
+    // Count classes by status with time consideration
+    let completed = 0;
+    let upcoming = 0;
+    let canceled = 0;
+
+    // Initialize distribution data structures
+    const timeSlotStats = {};
+    const dayStats = {};
+    const timeSlotStatusStats = {};
+
+    const allTimeSlots = [
+      "7:00-9:00",
+      "9:30-11:30",
+      "13:00-15:00",
+      "15:30-17:30",
+      "19:00-21:00",
+    ];
+
+    const allDays = [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+      "Sunday",
+    ];
+
+    // Initialize all possible combinations
+    allTimeSlots.forEach((slot) => {
+      timeSlotStats[slot] = 0;
+      timeSlotStatusStats[slot] = {
+        active: 0,
+        completed: 0,
+        canceled: 0,
+      };
+    });
+
+    allDays.forEach((day) => {
+      dayStats[day] = 0;
+    });
+
+    monthlyClasses.forEach((cls) => {
+      // Add to the appropriate statistics based on class status and time
+      if (cls.status === "completed") {
+        completed++;
+      } else if (cls.status === "canceled") {
+        canceled++;
+      } else if (cls.status === "active") {
+        // For active classes, we need to determine if they're truly upcoming
+        const startDate = new Date(cls.startDate);
+        const endDate = new Date(cls.endDate);
+        const currentDate = today.getDate();
+
+        // Check if class date range includes today
+        const isInDateRange = today >= startDate && today <= endDate;
+
+        // Check if today is the class day
+        const isTodayClassDay = cls.day === dayMapping[currentDay];
+
+        // If class is today, check if time has passed
+        if (isInDateRange && isTodayClassDay) {
+          // If time hasn't passed, it's upcoming for today
+          if (!hasTimeSlotPassed(cls.timeSlot)) {
+            upcoming++;
+          }
+          // Otherwise, it's passed for today but still active
+          // If class recurs in the future (within date range), it's still upcoming
+        } else if (endDate > today) {
+          // Class hasn't reached end date
+          upcoming++;
+        }
+      }
+
+      // Update time slot statistics
+      if (cls.timeSlot) {
+        timeSlotStats[cls.timeSlot] = (timeSlotStats[cls.timeSlot] || 0) + 1;
+
+        // Update time slot by status
+        if (timeSlotStatusStats[cls.timeSlot]) {
+          timeSlotStatusStats[cls.timeSlot][cls.status] =
+            (timeSlotStatusStats[cls.timeSlot][cls.status] || 0) + 1;
+        }
+      }
+
+      // Update day statistics
+      if (cls.day) {
+        dayStats[cls.day] = (dayStats[cls.day] || 0) + 1;
+      }
+    });
+
+    // Get the top time slots and days
+    const sortedTimeSlots = Object.entries(timeSlotStats)
+      .sort((a, b) => b[1] - a[1])
+      .reduce((obj, [key, value]) => {
+        if (value > 0) obj[key] = value;
+        return obj;
+      }, {});
+
+    const sortedDays = Object.entries(dayStats)
+      .sort((a, b) => b[1] - a[1])
+      .reduce((obj, [key, value]) => {
+        if (value > 0) obj[key] = value;
+        return obj;
+      }, {});
+
+    // Format time slot by status for API response
+    const formattedTimeSlotStatus = {};
+    Object.entries(timeSlotStatusStats).forEach(([slot, statuses]) => {
+      // Only include time slots that have classes
+      const total = Object.values(statuses).reduce(
+        (sum, count) => sum + count,
+        0
+      );
+      if (total > 0) {
+        formattedTimeSlotStatus[slot] = statuses;
+      }
+    });
+
+    res.json({
+      status: "success",
+      data: {
+        total: monthlyClasses.length,
+        completed,
+        upcoming,
+        canceled,
+        month: today.getMonth() + 1,
+        year: today.getFullYear(),
+        timeSlotDistribution: sortedTimeSlots,
+        dayDistribution: sortedDays,
+        timeSlotStatusDistribution: formattedTimeSlotStatus,
+        currentTime: {
+          day: dayMapping[currentDay],
+          hour: currentHour,
+          minute: currentMinute,
+        },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Có lỗi xảy ra khi lấy thống kê buổi học: " + error.message,
+    });
+  }
+};
+
+const getRevenueStats = async (req, res) => {
+  // log ra data getRevenueStats
+  try {
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
+    const lastDayOfMonth = new Date(currentYear, currentMonth + 1, 0);
+
+    const firstDayOfLastMonth = new Date(currentYear, currentMonth - 1, 1);
+    const lastDayOfLastMonth = new Date(currentYear, currentMonth, 0);
+
+    const currentMonthRevenue = await Payment.aggregate([
+      {
+        $match: {
+          status: "completed",
+          createdAt: {
+            $gte: firstDayOfMonth,
+            $lte: lastDayOfMonth,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    const lastMonthRevenue = await Payment.aggregate([
+      {
+        $match: {
+          status: "completed",
+          createdAt: {
+            $gte: firstDayOfLastMonth,
+            $lte: lastDayOfLastMonth,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: "$amount" },
+        },
+      },
+    ]);
+
+    // const pendingRevenue = await Payment.aggregate([
+    //   {
+    //     $match: {
+    //       status: "pending",
+    //       createdAt: {
+    //         $gte: firstDayOfMonth,
+    //         $lte: lastDayOfMonth,
+    //       },
+    //     },
+    //   },
+    //   {
+    //     $group: {
+    //       _id: null,
+    //       total: { $sum: "$amount" },
+    //     },
+    //   },
+    // ]);
+
+    // const completedRevenue = await Payment.aggregate([
+    //   {
+    //     $match: {
+    //       status: "completed",
+    //       createdAt: {
+    //         $gte: firstDayOfMonth,
+    //         $lte: lastDayOfMonth,
+    //       },
+    //     },
+    //   },
+    //   {
+    //     $group: {
+    //       _id: null,
+    //       total: { $sum: "$amount" },
+    //     },
+    //   },
+    // ]);
+
+    const monthlyRevenue =
+      currentMonthRevenue.length > 0 ? currentMonthRevenue[0].total : 0;
+    const prevMonthRevenue =
+      lastMonthRevenue.length > 0 ? lastMonthRevenue[0].total : 0;
+    // const pendingPayments =
+    //   pendingRevenue.length > 0 ? pendingRevenue[0].total : 0;
+    // const completedPayments =
+    //   completedRevenue.length > 0 ? completedRevenue[0].total : 0;
+
+    let percentChange = 0;
+    if (prevMonthRevenue > 0) {
+      percentChange = Math.round(
+        ((monthlyRevenue - prevMonthRevenue) / prevMonthRevenue) * 100
+      );
+    }
+
+    console.log("monthlyRevenue", monthlyRevenue);
+    console.log("prevMonthRevenue", prevMonthRevenue);
+
+    res.json({
+      status: "success",
+      data: {
+        monthlyRevenue: monthlyRevenue,
+        // pendingPayments: pendingPayments,
+        // completedPayments: completedPayments,
+        percentIncrease: percentChange,
+      },
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).json({
+      status: "error",
+      message: "Có lỗi xảy ra khi lấy thống kê doanh thu: " + error.message,
+    });
+  }
+};
+
 module.exports = {
   createClass,
   getClasses,
@@ -643,4 +973,6 @@ module.exports = {
   cancelClass,
   rescheduleClass,
   getClassHistory,
+  getClassStats,
+  getRevenueStats,
 };

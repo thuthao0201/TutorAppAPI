@@ -1,10 +1,10 @@
 const User = require("../models/user.model");
-const {hashPassword, comparePassword} = require("../utils/auth.util");
+const { hashPassword, comparePassword } = require("../utils/auth.util");
 
 const createUser = async (req, res) => {
   try {
     const password = await hashPassword(req.body.password);
-    const user = new User({...req.body, password});
+    const user = new User({ ...req.body, password });
     await user.save();
     res.status(201).json({
       status: "success",
@@ -21,10 +21,49 @@ const createUser = async (req, res) => {
 // Them pagination va filter cho getUsers
 const getUsers = async (req, res) => {
   try {
-    const users = await User.find({});
+    const { role, search, sort, limit = 20, page = 1 } = req.query;
+    const skip = (page - 1) * limit;
+
+    // Build query object
+    let query = {};
+
+    // Filter by role
+    if (role) {
+      query.role = role;
+    }
+
+    // Search by name or email
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Query users
+    let usersQuery = User.find(query).limit(parseInt(limit)).skip(skip);
+
+    // Sort users
+    if (sort) {
+      const sortField = sort.startsWith("-") ? sort.substring(1) : sort;
+      const sortOrder = sort.startsWith("-") ? -1 : 1;
+      usersQuery = usersQuery.sort({ [sortField]: sortOrder });
+    }
+
+    const users = await usersQuery;
+
+    // Count total users matching the query
+    const total = await User.countDocuments(query);
+
     res.json({
       status: "success",
       data: users,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -164,8 +203,8 @@ const changeInformation = async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      {...req.body},
-      {new: true, runValidators: true}
+      { ...req.body },
+      { new: true, runValidators: true }
     );
     if (!user) {
       return res.status(404).json({
@@ -190,8 +229,8 @@ const changeAvatar = async (req, res) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      {avatar: req.file.path},
-      {new: true, runValidators: true}
+      { avatar: req.file.path },
+      { new: true, runValidators: true }
     );
     if (!user) {
       return res.status(404).json({
@@ -210,8 +249,36 @@ const changeAvatar = async (req, res) => {
         "Có lỗi xảy ra khi cập nhật thông tin người dùng: " + error.message,
     });
   }
-}
+};
 
+const getStudentStats = async (req, res) => {
+  console.log("getStudentStats");
+  try {
+    const total = await User.countDocuments({ role: "student" });
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const newThisMonth = await User.countDocuments({
+      role: "student",
+      createdAt: { $gte: thirtyDaysAgo },
+    });
+
+    const stats = {
+      total: total,
+      newThisMonth: newThisMonth,
+    };
+
+    res.json({
+      status: "success",
+      data: stats,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Có lỗi xảy ra khi lấy thống kê học sinh: " + error.message,
+    });
+  }
+};
 
 module.exports = {
   createUser,
@@ -222,5 +289,6 @@ module.exports = {
   getInformation,
   changePassword,
   changeInformation,
-  changeAvatar
+  changeAvatar,
+  getStudentStats,
 };

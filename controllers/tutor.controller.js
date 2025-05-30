@@ -16,7 +16,7 @@ const createTutor = async (req, res) => {
       });
     }
 
-    const avatar = req.file ? req.file.path : null;
+    const avatar = req.file ? req.file.path : "/uploads/default-avatar.png";
     // if (!avatar) {
     //   return res.status(400).json({
     //     status: "fail",
@@ -34,6 +34,8 @@ const createTutor = async (req, res) => {
 
     const tutor = new Tutor({ ...req.body, userId: user._id });
     await tutor.save();
+    // Populate the userId field in the tutor document
+    await tutor.populate("userId");
     res.status(201).json({
       status: "success",
       data: tutor,
@@ -399,11 +401,30 @@ const getAvailableTutors = async (req, res) => {
 };
 
 const updateTutor = async (req, res) => {
+  console.log(req.body);
+
   try {
-    const tutor = await Tutor.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
+    const tutor = await Tutor.findById(req.params.tutorId);
+
+    const user = await User.findById(tutor.userId);
+
+    const { name, phone } = req.body;
+
+    user.name = name || user.name;
+    user.phone = phone || user.phone;
+
+    await user.save();
+
+    tutor.subjects = req.body.subjects || tutor.subjects;
+    tutor.classPrice = req.body.classPrice || tutor.classPrice;
+    tutor.specialized = req.body.specialized || tutor.specialized;
+    tutor.degree = req.body.degree || tutor.degree;
+    tutor.hasCertificate = req.body.hasCertificate || tutor.hasCertificate;
+    tutor.availableSchedule =
+      req.body.availableSchedule || tutor.availableSchedule;
+    tutor.introduce = req.body.introduce || tutor.introduce;
+    await tutor.save();
+
     if (!tutor) {
       return res.status(404).json({
         status: "fail",
@@ -412,7 +433,12 @@ const updateTutor = async (req, res) => {
     }
     res.json({
       status: "success",
-      data: tutor,
+      data: {
+        ...tutor.toObject(),
+        userId: {
+          ...user.toObject(),
+        },
+      },
     });
   } catch (error) {
     res.status(500).json({
@@ -482,7 +508,14 @@ const getOwnTutorProfile = async (req, res) => {
 
 const deleteTutor = async (req, res) => {
   try {
-    const tutor = await Tutor.findByIdAndDelete(req.params.id);
+    const tutor = await Tutor.findByIdAndDelete(req.params.tutorId);
+    const user = await User.findByIdAndDelete(tutor.userId);
+    if (!user) {
+      return res.status(404).json({
+        status: "fail",
+        message: "Không tìm thấy thông tin người dùng",
+      });
+    }
     if (!tutor) {
       return res.status(404).json({
         status: "fail",
@@ -530,6 +563,33 @@ const getTutorFavoriteCount = async (req, res) => {
   }
 };
 
+// Thêm hàm mới để lấy thống kê về gia sư
+const getTutorStats = async (req, res) => {
+  console.log("Fetching tutor stats...");
+  try {
+    const total = await Tutor.countDocuments();
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const newThisMonth = await Tutor.countDocuments({
+      createdAt: { $gte: thirtyDaysAgo },
+    });
+
+    res.json({
+      status: "success",
+      data: {
+        total: total,
+        newThisMonth: newThisMonth,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Có lỗi xảy ra khi lấy thống kê gia sư: " + error.message,
+    });
+  }
+};
+
 module.exports = {
   createTutor,
   getTutors,
@@ -539,4 +599,5 @@ module.exports = {
   getAvailableTutors,
   getTutorFavoriteCount,
   getOwnTutorProfile,
+  getTutorStats,
 };

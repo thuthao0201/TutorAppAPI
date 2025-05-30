@@ -10,14 +10,17 @@ const {
   cancelClass,
   rescheduleClass,
   getClassHistory,
+  getClassStats,
+  getRevenueStats,
 } = require("../controllers/class.controller");
-
 const {
   isAdmin,
   isOwnerOrAdmin,
   isAdminOrTutor,
 } = require("../middlewares/role.middleware");
 
+router.get("/revenue", isAdmin, getRevenueStats);
+router.get("/stats", getClassStats);
 // Tạo lớp học mới
 router.post("/", createClass);
 

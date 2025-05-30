@@ -65,7 +65,7 @@ const createPost = async (req, res) => {
 
     if (tutors.length === 0) {
       return res.status(201).json({
-        status: "success",
+        status: "fail",
         message:
           "Không tìm thấy giảng viên dạy môn học này. Vui lòng thử môn học khác.",
       });
@@ -553,6 +553,8 @@ const acceptPost = async (req, res) => {
       grade: post.grade,
       requirements: post.requirements,
       classPrice: tutor.classPrice,
+      joinUrl:
+        "https://meet.jit.si/" + Math.random().toString(36).substring(2, 15),
     });
 
     await newClass.save();
@@ -615,7 +617,8 @@ const rejectPost = async (req, res) => {
   try {
     const postId = req.params.id;
     const { reason } = req.body;
-    const tutorId = req.tutor._id; // Assuming tutor info is available from auth middleware
+    const tutor = await Tutor.findOne({ userId: req.user._id });
+    const tutorId = tutor._id;
 
     const post = await Post.findById(postId);
 
@@ -875,14 +878,18 @@ const getPostsForTutor = async (req, res) => {
 const getPostsForStudent = async (req, res) => {
   try {
     const studentId = req.user._id;
-    const posts = await Post.find({ studentId }).populate({
-      path: "classId",
-      populate: {
-        path: "tutorId",
-        populate: { path: "userId", select: "name email avatar" },
-      },
-    });
-
+    const posts = await Post.find({ studentId })
+      .populate({
+        path: "classId",
+        populate: {
+          path: "tutorId",
+          populate: { path: "userId", select: "name email avatar" },
+        },
+      })
+      .populate({
+        path: "currentAssignedTutor",
+        populate: { path: "userId", select: "name email avatar phone" },
+      });
     res.json({
       status: "success",
       data: posts,

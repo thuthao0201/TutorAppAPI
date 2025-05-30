@@ -10,10 +10,12 @@ const {
   changeInformation,
   changePassword,
   getInformation,
+  getStudentStats,
 } = require("../controllers/user.controller");
 const { isAdmin, isOwnerOrAdmin } = require("../middlewares/role.middleware");
 const upload = require("../configs/multer");
 
+router.get("/stats", getStudentStats);
 router.post("/", isAdmin, createUser);
 router.get("/information", getInformation);
 router.get("/:id", isOwnerOrAdmin, getUser);

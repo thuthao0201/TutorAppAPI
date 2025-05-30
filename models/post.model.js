@@ -19,12 +19,26 @@ const postSchema = new mongoose.Schema(
     timeSlot: {
       type: String,
       required: true,
-      enum: ["7:00-9:00", "9:30-11:30", "13:00-15:00", "15:30-17:30", "19:00-21:00"]
+      enum: [
+        "7:00-9:00",
+        "9:30-11:30",
+        "13:00-15:00",
+        "15:30-17:30",
+        "19:00-21:00",
+      ],
     },
     day: {
       type: String,
       required: true,
-      enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+      enum: [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+      ],
     },
     startDate: {
       type: Date,
@@ -51,29 +65,33 @@ const postSchema = new mongoose.Schema(
       type: String,
     },
     // Add fields for eligible and rejected tutors
-    eligibleTutors: [{
-      tutorId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Tutor",
+    eligibleTutors: [
+      {
+        tutorId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Tutor",
+        },
+        score: {
+          type: Number,
+          default: 0,
+        },
       },
-      score: {
-        type: Number,
-        default: 0,
-      }
-    }],
-    rejectedTutors: [{
-      tutorId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "Tutor",
+    ],
+    rejectedTutors: [
+      {
+        tutorId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Tutor",
+        },
+        reason: {
+          type: String,
+        },
+        rejectedAt: {
+          type: Date,
+          default: Date.now,
+        },
       },
-      reason: {
-        type: String,
-      },
-      rejectedAt: {
-        type: Date,
-        default: Date.now,
-      }
-    }],
+    ],
     currentAssignedTutor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Tutor",
